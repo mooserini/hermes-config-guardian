@@ -77,14 +77,15 @@ Install the release bundle in the current user's stable Applications directory:
 ```
 
 The installed app exposes an explicit **Launch at login** toggle in its
-Attention menu. macOS may require the user to approve the login item in System
+App Behavior menu. macOS may require the user to approve the login item in System
 Settings. Guardian reports that state instead of treating registration as
 successful.
 
 ## Intentional Hermes updates
 
-When Guardian reports a clean approved configuration, select **Begin Hermes
-update** before running a Hermes updater or setup flow. Guardian creates a
+When Guardian reports a clean approved configuration, select **Update
+maintenance…** before running a Hermes updater or setup flow. Guardian asks
+for confirmation, then creates a
 verified owner-only checkpoint and visibly enters maintenance mode. It keeps
 watching every distinct rewrite but suppresses repeated sound and window
 interruptions.

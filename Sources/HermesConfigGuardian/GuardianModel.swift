@@ -52,7 +52,7 @@ final class GuardianModel: ObservableObject {
         var title: String {
             switch self {
             case .unenrolled: return "Ready to enroll"
-            case .clean: return "Configuration approved"
+            case .clean: return "All monitored files are approved"
             case .maintenance: return "Hermes update in progress"
             case let .changed(count):
                 return count == 0
@@ -77,6 +77,7 @@ final class GuardianModel: ObservableObject {
     @Published private(set) var status: Status = .unenrolled
     @Published private(set) var pending: PendingChange?
     @Published private(set) var approved: ApprovedSnapshot?
+    @Published private(set) var lastCheckedAt: Date?
     @Published private(set) var maintenance: MaintenanceWindow?
     @Published private(set) var maintenanceObservedCount = 0
     @Published private(set) var maintenanceReviewReady = false
@@ -101,6 +102,22 @@ final class GuardianModel: ObservableObject {
 
     let sourceURL: URL
     let stateDirectory: URL
+
+    /// This release intentionally supports one enrolled file. Keeping the
+    /// presentation list-shaped makes the boundary explicit without claiming
+    /// that file enrollment, notification preferences, and approval authority
+    /// are the same thing.
+    var monitoredFileCount: Int { approved == nil ? 0 : 1 }
+
+    var monitoringSummary: String {
+        let count = monitoredFileCount
+        let fileText = "\(count) file\(count == 1 ? "" : "s") enrolled"
+        guard let lastCheckedAt else { return fileText }
+        if Date().timeIntervalSince(lastCheckedAt) < 5 {
+            return "\(fileText) · last check just now"
+        }
+        return "\(fileText) · last check \(lastCheckedAt.formatted(date: .omitted, time: .shortened))"
+    }
 
     private let store: ApprovalStore
     private let maintenanceStore: MaintenanceStore
@@ -323,6 +340,7 @@ final class GuardianModel: ObservableObject {
         guard let approved else { return }
         do {
             let current = try Data(contentsOf: sourceURL)
+            lastCheckedAt = Date()
             let hash = ApprovalStore.sha256(current)
             guard hash != approved.manifest.approvedHash else {
                 pending = nil
@@ -389,13 +407,15 @@ final class GuardianModel: ObservableObject {
                 maintenance = nil
                 maintenanceObservedCount = 0
                 maintenanceReviewReady = false
+                maintenanceMessage = "The final Hermes update result is now the approved configuration."
+            } else {
+                maintenanceMessage = nil
             }
             approved = try store.approve(sourceURL: sourceURL, data: latest)
             self.pending = nil
             clearClarification()
             reviewExpanded = false
             resetAttentionMarker()
-            maintenanceMessage = "The final Hermes update result is now the approved configuration."
             status = .clean
         } catch {
             status = .error("Approval failed: \(error.localizedDescription)")

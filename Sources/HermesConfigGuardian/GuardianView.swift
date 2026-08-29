@@ -4,6 +4,7 @@ import SwiftUI
 struct GuardianView: View {
     @ObservedObject var model: GuardianModel
     var onOpenWindow: (() -> Void)?
+    @State private var showMaintenanceConfirmation = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -45,37 +46,14 @@ struct GuardianView: View {
 
             HStack {
                 Button("Check now") { model.checkForChange() }
-                    .help("Re-read the watched file and compare it with the approved snapshot")
-                    .accessibilityHint("Compares the watched file with the approved snapshot")
-                if let onOpenWindow {
-                    Button("Open window") { onOpenWindow() }
-                        .help("Open Guardian in a resizable window")
-                        .accessibilityHint("Opens the same Guardian state in a resizable window")
-                }
-                Menu {
-                    Toggle("Play attention sound", isOn: $model.attentionSoundEnabled)
-                    Toggle("Open window automatically", isOn: $model.attentionWindowEnabled)
-                    Divider()
-                    Toggle(
-                        "Launch at login",
-                        isOn: Binding(
-                            get: { model.launchAtLoginEnabled },
-                            set: { model.setLaunchAtLogin($0) }
-                        )
-                    )
-                    if let message = model.launchAtLoginMessage {
-                        Text(message)
-                    }
-                    if model.launchAtLoginNeedsApproval {
-                        Button("Open Login Items Settings") {
-                            model.openLoginItemsSettings()
-                        }
-                    }
-                } label: {
-                    Label("Attention", systemImage: "bell")
-                }
-                .help("Choose how Guardian gets your attention when the watched file changes")
-                .accessibilityLabel("Attention settings")
+                    .disabled(model.approved == nil)
+                    .help(model.approved == nil
+                          ? "Enroll a configuration before checking for changes"
+                          : "Re-read the watched file and compare it with the approved snapshot")
+                    .accessibilityHint(model.approved == nil
+                                       ? "Unavailable until a configuration is enrolled"
+                                       : "Compares the watched file with the approved snapshot")
+                moreMenu
                 Spacer(minLength: 8)
                 Button("Quit") { NSApplication.shared.terminate(nil) }
                     .help("Quit Hermes Config Guardian")
@@ -95,6 +73,16 @@ struct GuardianView: View {
             alignment: .topLeading
         )
         .onAppear { model.refreshLaunchAtLoginStatus() }
+        .confirmationDialog(
+            "Start update maintenance?",
+            isPresented: $showMaintenanceConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Start maintenance") { model.beginHermesUpdate() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Guardian will seal the currently approved configuration, group expected Hermes update writes, preserve every observed proposal, and require final approval before the snapshot advances.")
+        }
     }
 
     private var header: some View {
@@ -107,7 +95,7 @@ struct GuardianView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(model.status.title)
                     .font(.headline)
-                Text(model.sourceURL.path)
+                Text(model.approved == nil ? model.sourceURL.path : model.monitoringSummary)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -135,33 +123,159 @@ struct GuardianView: View {
     }
 
     private var cleanView: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label("The file matches its approved snapshot.", systemImage: "checkmark.circle.fill")
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("MONITORED FILES")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                monitoredFileRow
+
+                Divider()
+
+                notificationsSection
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("AUTO-APPROVAL")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text("0 exact rules · Automatic approval is not enabled")
+                        .font(.subheadline)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                if let manifest = model.approved?.manifest {
+                    Text("Approved \(manifest.approvedAt.formatted(date: .abbreviated, time: .shortened)) · fingerprint \(manifest.approvedHash.prefix(12))…")
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .help("SHA-256 fingerprint of the approved snapshot")
+                }
+                if let message = model.maintenanceMessage {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .scrollBounceBehavior(.basedOnSize)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .accessibilityElement(children: .contain)
+    }
+
+    @ViewBuilder
+    private var monitoredFileRow: some View {
+        if let onOpenWindow {
+            Button(action: onOpenWindow) {
+                monitoredFileRowContent
+            }
+            .buttonStyle(.plain)
+            .help("Open this file in Guardian's resizable window")
+            .accessibilityLabel("Open monitored file \(model.sourceURL.lastPathComponent) in window")
+            .accessibilityHint("Opens the full Guardian window with this file's history, receipts, and review details")
+            .accessibilityValue("Approved")
+        } else {
+            monitoredFileRowContent
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Monitored file \(model.sourceURL.lastPathComponent)")
+                .accessibilityValue("Approved")
+        }
+    }
+
+    private var monitoredFileRowContent: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "checkmark.circle.fill")
                 .foregroundStyle(.green)
                 .symbolRenderingMode(.hierarchical)
-            if let manifest = model.approved?.manifest {
-                Text("Approved \(manifest.approvedAt.formatted(date: .abbreviated, time: .shortened))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Text("Fingerprint \(manifest.approvedHash.prefix(16))…")
+                .font(.title3)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(model.sourceURL.lastPathComponent)
+                    .font(.subheadline.weight(.semibold))
+                Text(model.sourceURL.path)
                     .font(.caption.monospaced())
                     .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-                    .help("SHA-256 fingerprint of the approved snapshot")
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help(model.sourceURL.path)
             }
-            if let message = model.maintenanceMessage {
+            Spacer(minLength: 8)
+            HStack(spacing: 4) {
+                Text("Approved")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.green)
+                if onOpenWindow != nil {
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                }
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.7), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private var notificationsSection: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text("NOTIFICATIONS")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Toggle("Open review window automatically", isOn: $model.attentionWindowEnabled)
+                .help("Open Guardian when a newly proposed file version needs a decision")
+            Toggle("Play attention sound", isOn: $model.attentionSoundEnabled)
+                .help("Play a sound when a newly proposed file version needs a decision")
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var moreMenu: some View {
+        Menu {
+            if model.approved != nil, model.pending == nil, model.maintenance == nil {
+                Button("Update maintenance…") {
+                    showMaintenanceConfirmation = true
+                }
+                Divider()
+            }
+            appBehaviorMenu
+        } label: {
+            Label("More", systemImage: "ellipsis.circle")
+        }
+        .help("Exceptional Guardian actions and app behavior")
+        .accessibilityLabel("More Guardian actions")
+    }
+
+    private var appBehaviorMenu: some View {
+        Menu {
+            Toggle(
+                "Launch at login",
+                isOn: Binding(
+                    get: { model.launchAtLoginEnabled },
+                    set: { model.setLaunchAtLogin($0) }
+                )
+            )
+            if let message = model.launchAtLoginMessage {
                 Text(message)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
-            Button("Begin Hermes update") { model.beginHermesUpdate() }
-                .buttonStyle(.bordered)
-                .help("Seal the current approved configuration before intentionally updating Hermes")
-                .accessibilityHint("Begins a durable maintenance window without approving later changes")
+            if model.launchAtLoginNeedsApproval {
+                Button("Open Login Items Settings") {
+                    model.openLoginItemsSettings()
+                }
+                .buttonStyle(.borderless)
+                .font(.caption)
+            }
+        } label: {
+            Label("App Behavior", systemImage: "gearshape")
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .contain)
+        .help("Guardian behavior that is not a notification or approval rule")
+        .accessibilityLabel("Guardian app behavior")
     }
 
     private var maintenanceActiveView: some View {

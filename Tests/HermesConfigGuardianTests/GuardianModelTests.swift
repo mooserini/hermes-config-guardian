@@ -30,6 +30,13 @@ final class GuardianModelTests: XCTestCase {
         )
     }
 
+    func testCleanStatusDescribesTheMonitoredFilesOverview() {
+        XCTAssertEqual(
+            GuardianModel.Status.clean.title,
+            "All monitored files are approved"
+        )
+    }
+
     func testMaintenanceWindowRehydratesAfterModelRestart() throws {
         let fixture = try makeFixture(data: Data("value: approved\n".utf8))
         defer { try? FileManager.default.removeItem(at: fixture.root) }
@@ -72,6 +79,26 @@ final class GuardianModelTests: XCTestCase {
         XCTAssertNil(model.maintenance)
         XCTAssertEqual(model.status, .clean)
         XCTAssertEqual(model.approved?.data, Data("value: final\n".utf8))
+        XCTAssertEqual(
+            model.maintenanceMessage,
+            "The final Hermes update result is now the approved configuration."
+        )
+    }
+
+    func testOrdinaryAcceptDoesNotClaimAHermesUpdateFinished() throws {
+        let fixture = try makeFixture(data: Data("value: approved\n".utf8))
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let model = makeModel(source: fixture.source, state: fixture.state)
+        model.enroll()
+        try Data("value: proposed\n".utf8).write(to: fixture.source, options: .atomic)
+        model.checkForChange()
+
+        model.accept()
+
+        XCTAssertEqual(model.status, .clean)
+        XCTAssertNil(model.maintenance)
+        XCTAssertNil(model.maintenanceMessage)
+        XCTAssertEqual(model.approved?.data, Data("value: proposed\n".utf8))
     }
 
     func testMaintenanceRejectRestoresExactCheckpointAfterInvalidFinalWrite() throws {
