@@ -19,6 +19,7 @@ The design is deliberately small: protect one consequential file well before exp
 - Detects semantic YAML changes while redacting likely credential values in reviews.
 - Offers `Accept`, `Review`, `Clarify`, and one-click `Reject` decisions.
 - Plays the built-in macOS `Glass` alert once for each newly detected proposal while changing the menu-bar shield to its attention state; repeated checksum reconciliation stays silent.
+- Invalid YAML exposes only `Clarify` and `Reject`; Guardian shows the isolated unparsed line locally and never permits acceptance.
 - Keeps quick decisions in the menu-bar panel and opens the same live state in a resizable window for longer reviews; explanation and evidence overflow stays inside one scrollable details area.
 - Binds clarification to the proposed file hash so a late explanation cannot attach to a newer edit.
 - Uses directory events plus periodic checksum reconciliation; routine checks invoke no model.
@@ -37,6 +38,7 @@ Clarify searches the Hermes documentation installed with the local Hermes build 
 - The hosted corpus is capped at 10 MB, cached for six hours with owner-only permissions, and refreshed using `ETag` and `Last-Modified` validators.
 - Configuration contents are never sent to the documentation server; that request retrieves only public documentation.
 - When the user presses Clarify, the selected inference provider receives bounded documentation excerpts and the redacted semantic changes, not the complete configuration file. Provider retention and training terms may still apply to that payload.
+- For invalid YAML, Clarify skips documentation and sends only the offending line, capped at 240 characters after local credential, path, email, and high-entropy-token redaction. The fragment is treated as quoted data, never an instruction; nothing is sent until the human presses Clarify.
 
 Hermes stateless inference through Nous' current free auxiliary recommendation is the primary explanation rail. Apple's on-device Foundation Model is an optional fallback, followed by deterministic behavior when neither model is available.
 

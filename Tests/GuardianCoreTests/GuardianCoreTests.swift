@@ -70,6 +70,83 @@ final class GuardianCoreTests: XCTestCase {
         XCTAssertThrowsError(try YAMLInspector.inspect(data: Data("- one\n- two\n".utf8)))
     }
 
+    func testRejectsTrailingGarbageAfterValidMapping() {
+        let data = Data(
+            """
+            model:
+              default: terra
+            compression:
+              idle_compact_after_seconds: 0
+            display:
+              tool_progress: all
+            I SHIT MY PANTS HELP ME
+            """.utf8
+        )
+
+        XCTAssertThrowsError(try YAMLInspector.inspect(data: data))
+    }
+
+    func testInvalidYAMLExcerptKeepsOnlyTheOffendingLine() throws {
+        let data = Data(
+            "model:\n  default: terra\nI SHIT MY PANTS HELP ME".utf8
+        )
+
+        do {
+            _ = try YAMLInspector.inspect(data: data)
+            XCTFail("Expected malformed YAML")
+        } catch {
+            let summary = InvalidYAMLExcerpt.summary(error: error)
+            XCTAssertTrue(summary.hasPrefix("YAML syntax error at line "), summary)
+            XCTAssertFalse(summary.contains("I SHIT MY PANTS"))
+            XCTAssertEqual(
+                InvalidYAMLExcerpt.extract(from: data, error: error),
+                "I SHIT MY PANTS HELP ME"
+            )
+        }
+    }
+
+    func testInvalidYAMLExcerptRedactsLikelySecrets() throws {
+        let data = Data(
+            "model:\n  default: terra\napi_key sk-proj-123456789012345678901234567890".utf8
+        )
+
+        do {
+            _ = try YAMLInspector.inspect(data: data)
+            XCTFail("Expected malformed YAML")
+        } catch {
+            XCTAssertEqual(
+                InvalidYAMLExcerpt.extract(from: data, error: error),
+                "[redacted invalid line]"
+            )
+        }
+    }
+
+    func testInvalidYAMLExcerptCapsNaturalLanguageAndRedactsBareKeyPrefixes() throws {
+        let longText = String(repeating: "ordinary words ", count: 30)
+        let longData = Data("model:\n  default: terra\n\(longText)".utf8)
+        let secretData = Data("model:\n  default: terra\nsk-proj-123456789012345678901234567890".utf8)
+
+        do {
+            _ = try YAMLInspector.inspect(data: longData)
+            XCTFail("Expected malformed YAML")
+        } catch {
+            XCTAssertEqual(
+                InvalidYAMLExcerpt.extract(from: longData, error: error)?.count,
+                240
+            )
+        }
+
+        do {
+            _ = try YAMLInspector.inspect(data: secretData)
+            XCTFail("Expected malformed YAML")
+        } catch {
+            XCTAssertEqual(
+                InvalidYAMLExcerpt.extract(from: secretData, error: error),
+                "[redacted invalid line]"
+            )
+        }
+    }
+
     func testRestoreUsesVerifiedApprovedBytes() throws {
         let source = temporaryDirectory.appendingPathComponent("config.yaml")
         let state = temporaryDirectory.appendingPathComponent("state", isDirectory: true)

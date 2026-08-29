@@ -143,6 +143,13 @@ struct GuardianView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityElement(children: .combine)
+
+                HStack(spacing: 8) {
+                    clarifyButton
+                    rejectButton
+                }
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel("Invalid configuration decision")
             } else {
                 Text("The file no longer matches the version you approved.")
                     .font(.subheadline)
@@ -156,19 +163,23 @@ struct GuardianView: View {
                 HStack(alignment: .center, spacing: 8) {
                     ProgressView()
                         .controlSize(.small)
-                    Text("Retrieving official documentation and preparing explanation…")
+                    Text(pending.validationError == nil
+                         ? "Retrieving official documentation and preparing explanation…"
+                         : "Preparing a safe explanation of the invalid text…")
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityElement(children: .combine)
-                .accessibilityLabel("Retrieving official documentation and preparing explanation")
+                .accessibilityLabel(pending.validationError == nil
+                                    ? "Retrieving official documentation and preparing explanation"
+                                    : "Preparing a safe explanation of the invalid text")
             }
 
             detailsScroll(pending)
 
-            if model.reviewExpanded || pending.validationError != nil {
+            if model.reviewExpanded && pending.validationError == nil {
                 Button("Restore approved version", role: .destructive) { model.restore() }
                     .buttonStyle(.bordered)
                     .help("Write the last approved snapshot back to the watched file")
@@ -224,9 +235,13 @@ struct GuardianView: View {
         Button("Clarify") { model.clarify() }
             .buttonStyle(.bordered)
             .disabled(model.isClarifying)
-            .help("Explain these changes from official documentation")
+            .help(model.pending?.validationError == nil
+                  ? "Explain these changes from official documentation"
+                  : "Explain why the text is invalid and briefly respond to the redacted offending fragment")
             .accessibilityLabel("Clarify")
-            .accessibilityHint("Retrieves official documentation and prepares an explanation of the proposed changes")
+            .accessibilityHint(model.pending?.validationError == nil
+                               ? "Retrieves official documentation and prepares an explanation of the proposed changes"
+                               : "Prepares a safe explanation of the invalid configuration text")
     }
 
     private var rejectButton: some View {
@@ -239,10 +254,11 @@ struct GuardianView: View {
 
     @ViewBuilder
     private func detailsScroll(_ pending: PendingChange) -> some View {
-        let showsReview = model.reviewExpanded || pending.validationError != nil
+        let showsReview = model.reviewExpanded && pending.validationError == nil
+        let showsInvalidFragment = pending.validationError != nil && pending.invalidFragment != nil
         let showsExplanation = model.explanation != nil
         let showsDocumentation = model.documentationStatus != nil
-        let hasDetails = showsReview || showsExplanation || showsDocumentation
+        let hasDetails = showsReview || showsInvalidFragment || showsExplanation || showsDocumentation
 
         if hasDetails {
             ScrollView {
@@ -253,6 +269,10 @@ struct GuardianView: View {
 
                     if let documentationStatus = model.documentationStatus {
                         documentationEvidence(status: documentationStatus)
+                    }
+
+                    if showsInvalidFragment, let fragment = pending.invalidFragment {
+                        invalidFragmentCard(fragment)
                     }
 
                     if showsReview {
@@ -272,6 +292,24 @@ struct GuardianView: View {
         }
     }
 
+    private func invalidFragmentCard(_ fragment: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Unparsed text")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text(fragment)
+                .font(.caption.monospaced())
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.7), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Unparsed invalid text")
+        .accessibilityValue(fragment)
+    }
+
     private func explanationCard(_ explanation: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(model.clarificationSource?.title ?? "Grounded explanation")
@@ -287,6 +325,7 @@ struct GuardianView: View {
         .background(.quaternary.opacity(0.7), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .accessibilityElement(children: .combine)
         .accessibilityLabel(model.clarificationSource?.title ?? "Grounded explanation")
+        .accessibilityValue(explanation)
     }
 
     private func documentationEvidence(status: String) -> some View {
