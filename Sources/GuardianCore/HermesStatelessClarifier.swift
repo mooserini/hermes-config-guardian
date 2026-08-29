@@ -27,6 +27,7 @@ public struct HermesClarification: Sendable, Equatable {
     public let text: String
     public let provider: String
     public let model: String
+    public let reasoningEffort: String
 }
 
 /// A deliberately narrow bridge to Hermes' internal stateless LLM helper.
@@ -104,7 +105,8 @@ public struct HermesStatelessClarifier: Sendable {
             instructions: instructions,
             evidence: evidence,
             provider: provider,
-            model: model
+            model: model,
+            reasoningEffort: "low"
         )
         guard let input = try? JSONEncoder().encode(request) else {
             throw HermesStatelessClarifierError.invalidPayload
@@ -170,7 +172,8 @@ public struct HermesStatelessClarifier: Sendable {
         return HermesClarification(
             text: response.text.trimmingCharacters(in: .whitespacesAndNewlines),
             provider: response.provider,
-            model: response.model
+            model: response.model,
+            reasoningEffort: response.reasoningEffort
         )
     }
 
@@ -179,12 +182,14 @@ public struct HermesStatelessClarifier: Sendable {
         let evidence: String
         let provider: String?
         let model: String?
+        let reasoningEffort: String
     }
 
     private struct Response: Codable {
         let text: String
         let provider: String
         let model: String
+        let reasoningEffort: String
     }
 
     private static let adapter = #"""
@@ -195,7 +200,7 @@ import sys
 logging.disable(logging.CRITICAL)
 payload = json.load(sys.stdin)
 
-from agent.oneshot import run_oneshot
+from agent.auxiliary_client import call_llm, extract_content_or_reasoning
 
 route_provider = payload.get("provider")
 route_model = payload.get("model")
@@ -213,19 +218,41 @@ main_runtime = resolve_runtime_provider(
 )
 main_runtime["model"] = route_model
 
-result = run_oneshot(
-    instructions=payload["instructions"],
-    user_input=payload["evidence"],
+reasoning_config = None
+reasoning_effort = "provider-default"
+if route_provider == "nous":
+    from hermes_cli.models import nous_model_reasoning_capabilities
+    capabilities = nous_model_reasoning_capabilities(
+        route_model,
+        allow_fetch=True,
+    )
+    if capabilities and capabilities.get("supports_reasoning"):
+        reasoning_effort = payload.get("reasoningEffort") or "low"
+        reasoning_config = {
+            "enabled": True,
+            "effort": reasoning_effort,
+        }
+    elif capabilities and not capabilities.get("supports_reasoning"):
+        reasoning_effort = "not-supported"
+
+response = call_llm(
     task="guardian_clarify",
+    messages=[
+        {"role": "system", "content": payload["instructions"]},
+        {"role": "user", "content": payload["evidence"]},
+    ],
     max_tokens=700,
     temperature=0.1,
     timeout=40.0,
     main_runtime=main_runtime,
+    reasoning_config=reasoning_config,
 )
+result = (extract_content_or_reasoning(response) or "").strip()
 sys.stdout.write(json.dumps({
     "text": result,
     "provider": route_provider,
     "model": route_model,
+    "reasoningEffort": reasoning_effort,
 }))
 """#
 }

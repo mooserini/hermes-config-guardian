@@ -41,6 +41,25 @@ final class GuardianCoreTests: XCTestCase {
         XCTAssertEqual(changes.first { $0.path == "secrets.token" }?.after, "<redacted>")
     }
 
+    func testSemanticDiffKeepsNumericTokenBudgetsVisible() throws {
+        let old = try YAMLInspector.inspect(data: Data("compression:\n  proactive_prune_tokens: 0\nmodel:\n  max_tokens: 700\n".utf8))
+        let new = try YAMLInspector.inspect(data: Data("compression:\n  proactive_prune_tokens: 8192\nmodel:\n  max_tokens: 512\n".utf8))
+        let changes = SemanticDiffer.changes(from: old, to: new)
+
+        XCTAssertEqual(changes.first { $0.path == "compression.proactive_prune_tokens" }?.before, "0")
+        XCTAssertEqual(changes.first { $0.path == "compression.proactive_prune_tokens" }?.after, "8192")
+        XCTAssertEqual(changes.first { $0.path == "model.max_tokens" }?.after, "512")
+    }
+
+    func testSensitivePathClassificationKeepsCredentialsRedacted() {
+        XCTAssertTrue(SemanticDiffer.isSensitive("providers.nous.api_key"))
+        XCTAssertTrue(SemanticDiffer.isSensitive("auth.refresh_token"))
+        XCTAssertTrue(SemanticDiffer.isSensitive("hooks.webhook_url"))
+        XCTAssertTrue(SemanticDiffer.isSensitive("secrets.unfamiliar_name"))
+        XCTAssertFalse(SemanticDiffer.isSensitive("compression.proactive_prune_tokens"))
+        XCTAssertFalse(SemanticDiffer.isSensitive("model.max_tokens"))
+    }
+
     func testNumericValuesAreNotWrappedAsOptionals() throws {
         let document = try YAMLInspector.inspect(data: Data("compression:\n  idle_compact_after_seconds: 300\n".utf8))
         XCTAssertEqual(document.flattenedValues["compression.idle_compact_after_seconds"], "300")
@@ -201,9 +220,14 @@ final class GuardianCoreTests: XCTestCase {
               *) exit 92 ;;
             esac
             case "$payload" in
-              *laguna-xs-2.1:free*) printf '%s' '{"text":"Human explanation from Hermes.","provider":"nous","model":"poolside/laguna-xs-2.1:free"}' ;;
+              *laguna-xs-2.1:free*) ;;
               *) exit 93 ;;
             esac
+            case "$payload" in
+              *reasoningEffort*low*) ;;
+              *) exit 94 ;;
+            esac
+            printf '%s' '{"text":"Human explanation from Hermes.","provider":"nous","model":"poolside/laguna-xs-2.1:free","reasoningEffort":"low"}'
             """
         )
         let clarifier = HermesStatelessClarifier(
@@ -221,6 +245,7 @@ final class GuardianCoreTests: XCTestCase {
         XCTAssertEqual(response.text, "Human explanation from Hermes.")
         XCTAssertEqual(response.provider, "nous")
         XCTAssertEqual(response.model, "poolside/laguna-xs-2.1:free")
+        XCTAssertEqual(response.reasoningEffort, "low")
     }
 
     func testHermesStatelessClarifierRejectsHalfConfiguredRoutePin() async throws {
@@ -283,7 +308,7 @@ final class GuardianCoreTests: XCTestCase {
             compression.idle_compact_after_seconds: 0 -> 300
             """
         )
-        print("LIVE_HERMES_ROUTE: \(response.provider)/\(response.model)")
+        print("LIVE_HERMES_ROUTE: \(response.provider)/\(response.model) reasoning=\(response.reasoningEffort)")
         print("LIVE_HERMES_CLARIFICATION:\n\(response.text)")
         XCTAssertTrue(response.text.contains("[1]"))
         XCTAssertTrue(response.text.lowercased().contains("may"))

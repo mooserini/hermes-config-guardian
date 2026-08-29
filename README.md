@@ -38,6 +38,8 @@ Clarify searches the Hermes documentation installed with the local Hermes build 
 
 Hermes stateless inference through Nous' current free auxiliary recommendation is the primary explanation rail. Apple's on-device Foundation Model is an optional fallback, followed by deterministic behavior when neither model is available.
 
+Guardian requests the lowest reasoning level supported by the current Nous route and displays that request beside the actual provider/model. If the live catalog reports no reasoning control, Guardian says so rather than pretending it disabled thinking. This keeps the small documentation-translation task bounded without editing Hermes' own configuration or source.
+
 For controlled comparisons, `HCG_HERMES_CLARIFY_PROVIDER` and `HCG_HERMES_CLARIFY_MODEL` may be set together to pin a single stateless clarification route without changing the watched Hermes configuration. Normal use leaves both unset and follows Nous' live free compaction/summarization recommendation.
 
 ## Build and test
@@ -82,6 +84,8 @@ The current test suite covers:
 - snapshot verification and exact-byte restoration;
 - append-only approval and rejection receipts;
 - sensitive-value redaction;
+- numeric token-budget visibility alongside credential redaction;
+- explicit low-reasoning requests for supported Nous clarification routes;
 - invalid YAML rejection;
 - atomic file replacement detection;
 - clean scalar presentation;

@@ -47,8 +47,24 @@ public enum SemanticDiffer {
     }
 
     public static func isSensitive(_ path: String) -> Bool {
-        let lower = path.lowercased()
-        return ["api_key", "apikey", "token", "secret", "password", "credential", "authorization", "webhook"]
-            .contains { lower.contains($0) }
+        let segments = path.lowercased().split { character in
+            character == "." || character == "[" || character == "]"
+        }
+
+        return segments.contains { segment in
+            let words = segment.split { !$0.isLetter && !$0.isNumber }.map(String.init)
+            let collapsed = words.joined()
+
+            if ["secrets", "credentials"].contains(String(segment)) { return true }
+            if [
+                "apikey", "accesstoken", "refreshtoken", "authtoken", "bearertoken",
+                "clientsecret", "password", "passphrase", "authorization", "webhookurl"
+            ].contains(collapsed) { return true }
+            if words.contains("secret") || words.contains("password") || words.contains("credential") {
+                return true
+            }
+            if words == ["token"] || words == ["webhook"] { return true }
+            return false
+        }
     }
 }

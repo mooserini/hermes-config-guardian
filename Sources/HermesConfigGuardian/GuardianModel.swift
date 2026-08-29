@@ -16,14 +16,14 @@ struct PendingChange: Sendable {
 @MainActor
 final class GuardianModel: ObservableObject {
     enum ClarificationSource {
-        case hermes(provider: String, model: String)
+        case hermes(provider: String, model: String, reasoningEffort: String)
         case apple
         case deterministic
 
         var title: String {
             switch self {
-            case let .hermes(provider, model):
-                return "Hermes stateless · \(provider)/\(model)"
+            case let .hermes(provider, model, reasoningEffort):
+                return "Hermes stateless · \(provider)/\(model) · requested reasoning \(reasoningEffort)"
             case .apple:
                 return "Apple on-device fallback"
             case .deterministic:
@@ -369,7 +369,11 @@ final class GuardianModel: ObservableObject {
            ) {
             return (
                 response.text,
-                .hermes(provider: response.provider, model: response.model)
+                .hermes(
+                    provider: response.provider,
+                    model: response.model,
+                    reasoningEffort: response.reasoningEffort
+                )
             )
         }
 
