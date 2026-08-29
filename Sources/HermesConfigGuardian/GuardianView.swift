@@ -114,15 +114,17 @@ struct GuardianView: View {
 
             if let explanation = model.explanation {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("On-device explanation")
+                    Text(model.clarificationSource?.rawValue ?? "Grounded explanation")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                     Text(explanation)
                         .font(.callout)
                         .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(10)
                 .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+                .layoutPriority(2)
             }
 
             if let documentationStatus = model.documentationStatus {

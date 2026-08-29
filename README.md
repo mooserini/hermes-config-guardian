@@ -27,14 +27,15 @@ Guardian currently detects completed writes. It is not a privileged pre-write fi
 
 Clarify searches the Hermes documentation installed with the local Hermes build first, then checks the official hosted `llms-full.txt` corpus.
 
-- Only bounded passages matching changed setting paths are given to Apple's on-device Foundation Model.
+- Only bounded passages matching changed setting paths are given to Hermes' stateless model-call helper.
+- The configured Hermes provider and main model are reused without loading tools, memory, rules, skills, a conversation, or a session.
 - The exact evidence and official source link remain visible beneath the explanation.
 - Guardian reports whether installed and hosted passages agree.
 - If no exact passage is found, Guardian does not ask the model to infer the setting's behavior.
 - The hosted corpus is capped at 10 MB, cached for six hours with owner-only permissions, and refreshed using `ETag` and `Last-Modified` validators.
 - Configuration contents are never sent to the documentation server. The only network request retrieves public documentation.
 
-Foundation Models are optional. On unsupported systems, Guardian falls back to deterministic behavior.
+Hermes stateless inference is the primary explanation rail. Apple's on-device Foundation Model is an optional fallback, followed by deterministic behavior when neither model is available.
 
 ## Build and test
 

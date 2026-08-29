@@ -159,4 +159,115 @@ final class GuardianCoreTests: XCTestCase {
         )
         XCTAssertEqual(excerpt.origin, .hosted)
     }
+
+    func testHermesStatelessClarifierDiscoveryUsesIsolatedHermesRuntime() throws {
+        let home = temporaryDirectory.appendingPathComponent("home", isDirectory: true)
+        let agent = home.appendingPathComponent(".hermes/hermes-agent", isDirectory: true)
+        let python = agent.appendingPathComponent(".venv/bin/python")
+        let helper = agent.appendingPathComponent("agent/oneshot.py")
+        try FileManager.default.createDirectory(
+            at: python.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: helper.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data("#!/bin/sh\nexit 0\n".utf8).write(to: python)
+        try Data("# test helper\n".utf8).write(to: helper)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: python.path
+        )
+
+        let clarifier = try XCTUnwrap(
+            HermesStatelessClarifier.discover(environment: [:], homeDirectory: home)
+        )
+        XCTAssertEqual(clarifier.pythonURL.standardizedFileURL, python.standardizedFileURL)
+        XCTAssertEqual(clarifier.agentDirectory.standardizedFileURL, agent.standardizedFileURL)
+    }
+
+    func testHermesStatelessClarifierSendsEvidenceOverStandardInput() async throws {
+        let fakePython = try makeExecutable(
+            named: "fake-python",
+            contents: """
+            #!/bin/sh
+            case "$*" in
+              *guardian-secret*) exit 91 ;;
+            esac
+            payload=$(cat)
+            case "$payload" in
+              *guardian-secret*) printf 'Human explanation from Hermes.' ;;
+              *) exit 92 ;;
+            esac
+            """
+        )
+        let clarifier = HermesStatelessClarifier(
+            pythonURL: fakePython,
+            agentDirectory: temporaryDirectory,
+            timeout: 2
+        )
+
+        let response = try await clarifier.explain(
+            instructions: "Use only the supplied documentation.",
+            evidence: "guardian-secret"
+        )
+        XCTAssertEqual(response, "Human explanation from Hermes.")
+    }
+
+    func testHermesStatelessClarifierTimesOut() async throws {
+        let fakePython = try makeExecutable(
+            named: "slow-python",
+            contents: """
+            #!/bin/sh
+            cat >/dev/null
+            sleep 3
+            printf 'too late'
+            """
+        )
+        let clarifier = HermesStatelessClarifier(
+            pythonURL: fakePython,
+            agentDirectory: temporaryDirectory,
+            timeout: 1
+        )
+
+        do {
+            _ = try await clarifier.explain(instructions: "Explain.", evidence: "Evidence.")
+            XCTFail("Expected the stateless helper to time out")
+        } catch let error as HermesStatelessClarifierError {
+            XCTAssertEqual(error, .timedOut)
+        }
+    }
+
+    func testLiveHermesStatelessClarificationWhenExplicitlyEnabled() async throws {
+        guard ProcessInfo.processInfo.environment["HCG_LIVE_HERMES_TEST"] == "1" else {
+            throw XCTSkip("Set HCG_LIVE_HERMES_TEST=1 to exercise authenticated Hermes inference.")
+        }
+        let clarifier = try XCTUnwrap(HermesStatelessClarifier.discover())
+        let response = try await clarifier.explain(
+            instructions: """
+            Translate the Hermes configuration change into plain human language. Use only the supplied documentation. Say what the person will notice, cite [1], and return only the explanation.
+            """,
+            evidence: """
+            [1] Installed Hermes documentation
+            idle_compact_after_seconds is an opt-in, time-based compaction trigger. A value of 0 disables idle-triggered compaction. A value above 0 means that when an eligible session resumes after at least that many seconds of inactivity, Hermes may compact accumulated history before the first reply.
+
+            Proposed change:
+            compression.idle_compact_after_seconds: 0 -> 300
+            """
+        )
+        print("LIVE_HERMES_CLARIFICATION:\n\(response)")
+        XCTAssertTrue(response.contains("[1]"))
+        XCTAssertFalse(response.isEmpty)
+    }
+
+    private func makeExecutable(named name: String, contents: String) throws -> URL {
+        let url = temporaryDirectory.appendingPathComponent(name)
+        try Data(contents.utf8).write(to: url)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: url.path
+        )
+        return url
+    }
 }
