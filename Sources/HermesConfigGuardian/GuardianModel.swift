@@ -1,3 +1,4 @@
+import AppKit
 import Combine
 import Foundation
 import GuardianCore
@@ -77,10 +78,16 @@ final class GuardianModel: ObservableObject {
     private let store: ApprovalStore
     private let documentationClient: HermesDocumentationClient
     private let hermesClarifier: HermesStatelessClarifier?
+    private let attentionMarkerURL: URL
+    private let playAttentionSound: @MainActor () -> Void
+    private var attentionGate: ProposalAttentionGate
     private var watcher: DirectoryWatcher?
     private var reconciliationTimer: Timer?
 
-    init(environment: [String: String] = ProcessInfo.processInfo.environment) {
+    init(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        playAttentionSound: @escaping @MainActor () -> Void = GuardianAttentionSound.play
+    ) {
         let home = FileManager.default.homeDirectoryForCurrentUser
         sourceURL = URL(fileURLWithPath: environment["HCG_TARGET_CONFIG"] ?? home.appendingPathComponent(".hermes/config.yaml").path)
 
@@ -90,6 +97,13 @@ final class GuardianModel: ObservableObject {
             let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
             stateDirectory = support.appendingPathComponent("Hermes Config Guardian", isDirectory: true)
         }
+        attentionMarkerURL = stateDirectory.appendingPathComponent("last-notified-proposal.txt")
+        let lastNotifiedHash = try? String(contentsOf: attentionMarkerURL, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        attentionGate = ProposalAttentionGate(
+            lastNotifiedProposalHash: lastNotifiedHash?.isEmpty == false ? lastNotifiedHash : nil
+        )
+        self.playAttentionSound = playAttentionSound
         store = ApprovalStore(stateDirectory: stateDirectory)
         let installedDocsPath = environment["HCG_HERMES_DOCS_DIR"]
             ?? home.appendingPathComponent(".hermes/hermes-agent/website/docs", isDirectory: true).path
@@ -137,6 +151,7 @@ final class GuardianModel: ObservableObject {
             pending = nil
             clearClarification()
             reviewExpanded = false
+            resetAttentionMarker()
             status = .clean
         } catch {
             status = .error("Enrollment failed: \(error.localizedDescription)")
@@ -151,6 +166,7 @@ final class GuardianModel: ObservableObject {
             guard hash != approved.manifest.approvedHash else {
                 pending = nil
                 clearClarification()
+                resetAttentionMarker()
                 status = .clean
                 return
             }
@@ -181,6 +197,7 @@ final class GuardianModel: ObservableObject {
                 clearClarification()
                 isClarifying = false
             }
+            notifyIfNeeded(proposalHash: hash)
         } catch {
             status = .error("Could not read the watched file: \(error.localizedDescription)")
         }
@@ -199,6 +216,7 @@ final class GuardianModel: ObservableObject {
             self.pending = nil
             clearClarification()
             reviewExpanded = false
+            resetAttentionMarker()
             status = .clean
         } catch {
             status = .error("Approval failed: \(error.localizedDescription)")
@@ -212,6 +230,7 @@ final class GuardianModel: ObservableObject {
             pending = nil
             clearClarification()
             reviewExpanded = false
+            resetAttentionMarker()
             status = .clean
         } catch {
             status = .error("Restore failed: \(error.localizedDescription)")
@@ -237,6 +256,7 @@ final class GuardianModel: ObservableObject {
             pending = nil
             clearClarification()
             reviewExpanded = false
+            resetAttentionMarker()
             status = .clean
         } catch {
             status = .error("Rejection failed: \(error.localizedDescription)")
@@ -289,6 +309,27 @@ final class GuardianModel: ObservableObject {
         } catch {
             status = .error(error.localizedDescription)
         }
+    }
+
+    private func notifyIfNeeded(proposalHash: String) {
+        guard attentionGate.shouldNotify(proposalHash: proposalHash) else { return }
+        try? FileManager.default.createDirectory(
+            at: stateDirectory,
+            withIntermediateDirectories: true
+        )
+        try? Data("\(proposalHash)\n".utf8).write(to: attentionMarkerURL, options: .atomic)
+        try? FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: attentionMarkerURL.path
+        )
+        playAttentionSound()
+    }
+
+    private func resetAttentionMarker() {
+        guard attentionGate.lastNotifiedProposalHash != nil
+                || FileManager.default.fileExists(atPath: attentionMarkerURL.path) else { return }
+        attentionGate.reset()
+        try? FileManager.default.removeItem(at: attentionMarkerURL)
     }
 
     private func startReconciliationTimer(environment: [String: String]) {
@@ -412,5 +453,18 @@ final class GuardianModel: ObservableObject {
             text += ". Review the exact paths before accepting."
         }
         return text
+    }
+}
+
+private enum GuardianAttentionSound {
+    private static let attention = NSSound(named: NSSound.Name("Glass"))
+
+    @MainActor
+    static func play() {
+        if let sound = attention {
+            sound.play()
+        } else {
+            NSSound.beep()
+        }
     }
 }

@@ -132,6 +132,20 @@ final class GuardianCoreTests: XCTestCase {
         watcher.stop()
     }
 
+    func testProposalAttentionGateNotifiesOncePerDistinctProposal() {
+        var gate = ProposalAttentionGate()
+
+        XCTAssertTrue(gate.shouldNotify(proposalHash: "proposal-a"))
+        XCTAssertFalse(gate.shouldNotify(proposalHash: "proposal-a"))
+        XCTAssertTrue(gate.shouldNotify(proposalHash: "proposal-b"))
+
+        var rehydratedGate = ProposalAttentionGate(lastNotifiedProposalHash: "proposal-b")
+        XCTAssertFalse(rehydratedGate.shouldNotify(proposalHash: "proposal-b"))
+
+        gate.reset()
+        XCTAssertTrue(gate.shouldNotify(proposalHash: "proposal-b"))
+    }
+
     func testIdleCompactionKnowledgeDefinesZeroAsDisabled() throws {
         let fact = try XCTUnwrap(
             HermesSettingKnowledge.verifiedFact(for: "compression.idle_compact_after_seconds")
