@@ -48,7 +48,10 @@ final class GuardianModel: ObservableObject {
             switch self {
             case .unenrolled: return "Ready to enroll"
             case .clean: return "Configuration approved"
-            case let .changed(count): return "\(count) change\(count == 1 ? " needs" : "s need") attention"
+            case let .changed(count):
+                return count == 0
+                    ? "File rewrite needs attention"
+                    : "\(count) change\(count == 1 ? " needs" : "s need") attention"
             case .invalid: return "Configuration is invalid"
             case .error: return "Guardian needs attention"
             }
@@ -295,6 +298,12 @@ final class GuardianModel: ObservableObject {
             clarifyInvalid(pending, requestedHash: requestedHash)
             return
         }
+        if pending.changes.isEmpty {
+            explanation = Self.deterministicExplanation(for: pending, modelFailure: nil)
+            clarificationSource = .deterministic
+            isClarifying = false
+            return
+        }
         Task {
             let documentation = await documentationClient.lookup(
                 settingPaths: pending.changes.map(\.path)
@@ -503,6 +512,9 @@ final class GuardianModel: ObservableObject {
     private static func deterministicExplanation(for pending: PendingChange, modelFailure: String?) -> String {
         if let validationError = pending.validationError {
             return "The changed file is not valid YAML, so it cannot be accepted. \(validationError)"
+        }
+        if pending.changes.isEmpty {
+            return "The file’s bytes changed, but Guardian found no configuration setting changes after parsing the YAML. There are no changed setting paths to review. Accept approves the rewritten byte layout; Reject restores the exact approved bytes."
         }
         let affectedRoots = Set(pending.changes.compactMap { $0.path.split(separator: ".").first.map(String.init) }).sorted()
         var text = "The proposal changes \(pending.changes.count) setting\(pending.changes.count == 1 ? "" : "s")"
