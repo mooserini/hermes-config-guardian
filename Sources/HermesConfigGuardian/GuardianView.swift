@@ -53,6 +53,22 @@ struct GuardianView: View {
                 Menu {
                     Toggle("Play attention sound", isOn: $model.attentionSoundEnabled)
                     Toggle("Open window automatically", isOn: $model.attentionWindowEnabled)
+                    Divider()
+                    Toggle(
+                        "Launch at login",
+                        isOn: Binding(
+                            get: { model.launchAtLoginEnabled },
+                            set: { model.setLaunchAtLogin($0) }
+                        )
+                    )
+                    if let message = model.launchAtLoginMessage {
+                        Text(message)
+                    }
+                    if model.launchAtLoginNeedsApproval {
+                        Button("Open Login Items Settings") {
+                            model.openLoginItemsSettings()
+                        }
+                    }
                 } label: {
                     Label("Attention", systemImage: "bell")
                 }
@@ -76,6 +92,7 @@ struct GuardianView: View {
             maxHeight: .infinity,
             alignment: .topLeading
         )
+        .onAppear { model.refreshLaunchAtLoginStatus() }
     }
 
     private var header: some View {

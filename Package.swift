@@ -25,6 +25,10 @@ let package = Package(
             name: "GuardianCoreTests",
             dependencies: ["GuardianCore"]
         ),
+        .testTarget(
+            name: "HermesConfigGuardianTests",
+            dependencies: ["HermesConfigGuardian", "GuardianCore"]
+        ),
     ],
     swiftLanguageModes: [.v5]
 )

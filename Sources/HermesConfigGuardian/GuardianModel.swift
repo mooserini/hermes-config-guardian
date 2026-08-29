@@ -2,6 +2,7 @@ import AppKit
 import Combine
 import Foundation
 import GuardianCore
+import ServiceManagement
 
 #if canImport(FoundationModels)
 import FoundationModels
@@ -19,18 +20,21 @@ struct PendingChange: Sendable {
 final class GuardianModel: ObservableObject {
     enum ClarificationSource {
         case hermes(provider: String, model: String, reasoningEffort: String)
-        case apple
+        case apple(hermesFailure: String)
         case deterministic
+        case deterministicAfterFailure(reason: String)
         case typeSafety
 
         var title: String {
             switch self {
             case let .hermes(provider, model, reasoningEffort):
                 return "Hermes stateless · \(provider)/\(model) · requested reasoning \(reasoningEffort)"
-            case .apple:
-                return "Apple on-device fallback"
+            case let .apple(hermesFailure):
+                return "Apple on-device fallback · \(hermesFailure)"
             case .deterministic:
                 return "Deterministic fallback"
+            case let .deterministicAfterFailure(reason):
+                return "Deterministic fallback · \(reason)"
             case .typeSafety:
                 return "Type safety check"
             }
@@ -81,6 +85,9 @@ final class GuardianModel: ObservableObject {
     @Published var attentionWindowEnabled: Bool {
         didSet { attentionPreferences.setOpensReviewWindow(attentionWindowEnabled) }
     }
+    @Published private(set) var launchAtLoginEnabled = false
+    @Published private(set) var launchAtLoginMessage: String?
+    @Published private(set) var launchAtLoginNeedsApproval = false
     @Published private(set) var documentationExcerpts: [DocumentationExcerpt] = []
     @Published private(set) var documentationStatus: String?
     @Published private(set) var documentationWarning: String?
@@ -135,6 +142,7 @@ final class GuardianModel: ObservableObject {
             environment: environment,
             homeDirectory: home
         )
+        refreshLaunchAtLoginStatus()
 
         do {
             approved = try store.loadApproved()
@@ -180,6 +188,51 @@ final class GuardianModel: ObservableObject {
 
     func setAttentionWindowHandler(_ handler: @escaping @MainActor () -> Void) {
         openAttentionWindow = handler
+    }
+
+    func setLaunchAtLogin(_ enabled: Bool) {
+        do {
+            if enabled {
+                if SMAppService.mainApp.status != .enabled {
+                    try SMAppService.mainApp.register()
+                }
+            } else if SMAppService.mainApp.status != .notRegistered {
+                try SMAppService.mainApp.unregister()
+            }
+            refreshLaunchAtLoginStatus()
+        } catch {
+            refreshLaunchAtLoginStatus()
+            launchAtLoginMessage = "Launch at login could not be changed: \(error.localizedDescription)"
+        }
+    }
+
+    func refreshLaunchAtLoginStatus() {
+        switch SMAppService.mainApp.status {
+        case .enabled:
+            launchAtLoginEnabled = true
+            launchAtLoginNeedsApproval = false
+            launchAtLoginMessage = "Guardian will start when you log in."
+        case .requiresApproval:
+            launchAtLoginEnabled = false
+            launchAtLoginNeedsApproval = true
+            launchAtLoginMessage = "macOS requires approval in Login Items."
+        case .notRegistered:
+            launchAtLoginEnabled = false
+            launchAtLoginNeedsApproval = false
+            launchAtLoginMessage = nil
+        case .notFound:
+            launchAtLoginEnabled = false
+            launchAtLoginNeedsApproval = false
+            launchAtLoginMessage = "Install Guardian in Applications before enabling launch at login."
+        @unknown default:
+            launchAtLoginEnabled = false
+            launchAtLoginNeedsApproval = false
+            launchAtLoginMessage = "Launch-at-login status is unknown."
+        }
+    }
+
+    func openLoginItemsSettings() {
+        SMAppService.openSystemSettingsLoginItems()
     }
 
     func checkForChange() {
@@ -481,32 +534,49 @@ final class GuardianModel: ObservableObject {
         request: (instructions: String, evidence: String),
         pending: PendingChange
     ) async -> (text: String, source: ClarificationSource) {
-        if let hermesClarifier,
-           let response = try? await hermesClarifier.explain(
-               instructions: request.instructions,
-               evidence: request.evidence
-           ) {
-            return (
-                response.text,
-                .hermes(
-                    provider: response.provider,
-                    model: response.model,
-                    reasoningEffort: response.reasoningEffort
+        let hermesFailure: String
+        if let hermesClarifier {
+            do {
+                let response = try await hermesClarifier.explain(
+                    instructions: request.instructions,
+                    evidence: request.evidence
                 )
-            )
+                return (
+                    response.text,
+                    .hermes(
+                        provider: response.provider,
+                        model: response.model,
+                        reasoningEffort: response.reasoningEffort
+                    )
+                )
+            } catch {
+                hermesFailure = error.localizedDescription
+            }
+        } else {
+            hermesFailure = HermesStatelessClarifierError.unavailable.localizedDescription
         }
 
         #if canImport(FoundationModels)
         if #available(macOS 26.0, *), SystemLanguageModel.default.availability == .available {
             do {
                 let session = LanguageModelSession(instructions: request.instructions)
-                return (try await session.respond(to: request.evidence).content, .apple)
+                return (
+                    try await session.respond(to: request.evidence).content,
+                    .apple(hermesFailure: hermesFailure)
+                )
             } catch {
-                return (Self.deterministicExplanation(for: pending, modelFailure: error.localizedDescription), .deterministic)
+                let failure = "Hermes: \(hermesFailure) Apple: \(error.localizedDescription)"
+                return (
+                    Self.deterministicExplanation(for: pending, modelFailure: failure),
+                    .deterministicAfterFailure(reason: failure)
+                )
             }
         }
         #endif
-        return (Self.deterministicExplanation(for: pending, modelFailure: nil), .deterministic)
+        return (
+            Self.deterministicExplanation(for: pending, modelFailure: hermesFailure),
+            .deterministicAfterFailure(reason: hermesFailure)
+        )
     }
 
     private static func deterministicExplanation(for pending: PendingChange, modelFailure: String?) -> String {
@@ -520,7 +590,7 @@ final class GuardianModel: ObservableObject {
         var text = "The proposal changes \(pending.changes.count) setting\(pending.changes.count == 1 ? "" : "s")"
         if !affectedRoots.isEmpty { text += " under: \(affectedRoots.joined(separator: ", "))." }
         if let modelFailure {
-            text += " The on-device explanation was unavailable (\(modelFailure)), so this is the deterministic summary."
+            text += " Automated explanation was unavailable (\(modelFailure)), so this is the deterministic summary."
         } else {
             text += ". Review the exact paths before accepting."
         }

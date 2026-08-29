@@ -69,6 +69,17 @@ Build the locally signed menu-bar application:
 
 The bundle is created at `build/Hermes Config Guardian.app`.
 
+Install the release bundle in the current user's stable Applications directory:
+
+```sh
+./scripts/install-app.sh
+```
+
+The installed app exposes an explicit **Launch at login** toggle in its
+Attention menu. macOS may require the user to approve the login item in System
+Settings. Guardian reports that state instead of treating registration as
+successful.
+
 ## Disposable-file trial
 
 Test with a disposable YAML file and isolated state directory before pointing Guardian at a real configuration:
@@ -105,9 +116,13 @@ The first resizable-window stress test produced an unexpectedly memorable piece 
 
 The first live Hermes wizard run added a second artifact when speech-to-text confidently renamed a Nous timeout: [Wheat Mouse](docs/lab-notes/wheat-mouse.md) now stands for a fallback provider failing without gaining authority over the protected file.
 
+The evidence and limits from the first trial against a real Hermes configuration are recorded in [First live validation — 2026-08-29](docs/first-live-validation-2026-08-29.md).
+
 ## Roadmap
 
 The immediate goal is to make the one-file contract boringly reliable. A later version may generalize the same human-approval boundary to other silently rewritten Hermes state, including skill and pending-skill directories, without moving authority back inside the harness being watched.
+
+A planned [durable maintenance window](docs/design/durable-maintenance-window.md) will group the many writes made by an intentional Hermes update into one final human review without granting the updater automatic approval.
 
 ## Runtime privacy
 
