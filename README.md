@@ -37,6 +37,8 @@ Clarify searches the Hermes documentation installed with the local Hermes build 
 
 Hermes stateless inference is the primary explanation rail. Apple's on-device Foundation Model is an optional fallback, followed by deterministic behavior when neither model is available.
 
+For controlled comparisons, `HCG_HERMES_CLARIFY_PROVIDER` and `HCG_HERMES_CLARIFY_MODEL` may be set together to pin a single stateless clarification route without changing the watched Hermes configuration. Normal use leaves both unset and follows the configured main provider and model.
+
 ## Build and test
 
 Requirements:

@@ -193,19 +193,25 @@ final class GuardianCoreTests: XCTestCase {
             contents: """
             #!/bin/sh
             case "$*" in
-              *guardian-secret*) exit 91 ;;
+              *guardian-secret*|*laguna-xs*) exit 91 ;;
             esac
             payload=$(cat)
             case "$payload" in
-              *guardian-secret*) printf 'Human explanation from Hermes.' ;;
+              *guardian-secret*) ;;
               *) exit 92 ;;
+            esac
+            case "$payload" in
+              *laguna-xs-2.1:free*) printf 'Human explanation from Hermes.' ;;
+              *) exit 93 ;;
             esac
             """
         )
         let clarifier = HermesStatelessClarifier(
             pythonURL: fakePython,
             agentDirectory: temporaryDirectory,
-            timeout: 2
+            timeout: 2,
+            provider: "nous",
+            model: "poolside/laguna-xs-2.1:free"
         )
 
         let response = try await clarifier.explain(
@@ -213,6 +219,25 @@ final class GuardianCoreTests: XCTestCase {
             evidence: "guardian-secret"
         )
         XCTAssertEqual(response, "Human explanation from Hermes.")
+    }
+
+    func testHermesStatelessClarifierRejectsHalfConfiguredRoutePin() async throws {
+        let fakePython = try makeExecutable(
+            named: "unused-python",
+            contents: "#!/bin/sh\nexit 93\n"
+        )
+        let clarifier = HermesStatelessClarifier(
+            pythonURL: fakePython,
+            agentDirectory: temporaryDirectory,
+            provider: "nous"
+        )
+
+        do {
+            _ = try await clarifier.explain(instructions: "Explain.", evidence: "Evidence.")
+            XCTFail("Expected an incomplete route pin to be rejected")
+        } catch let error as HermesStatelessClarifierError {
+            XCTAssertEqual(error, .invalidPayload)
+        }
     }
 
     func testHermesStatelessClarifierTimesOut() async throws {

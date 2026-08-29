@@ -33,11 +33,21 @@ public struct HermesStatelessClarifier: Sendable {
     public let pythonURL: URL
     public let agentDirectory: URL
     public let timeout: TimeInterval
+    public let provider: String?
+    public let model: String?
 
-    public init(pythonURL: URL, agentDirectory: URL, timeout: TimeInterval = 45) {
+    public init(
+        pythonURL: URL,
+        agentDirectory: URL,
+        timeout: TimeInterval = 45,
+        provider: String? = nil,
+        model: String? = nil
+    ) {
         self.pythonURL = pythonURL
         self.agentDirectory = agentDirectory
         self.timeout = max(timeout, 1)
+        self.provider = provider?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        self.model = model?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
     }
 
     public static func discover(
@@ -74,12 +84,22 @@ public struct HermesStatelessClarifier: Sendable {
         return HermesStatelessClarifier(
             pythonURL: pythonURL,
             agentDirectory: agentDirectory,
-            timeout: configuredTimeout
+            timeout: configuredTimeout,
+            provider: environment["HCG_HERMES_CLARIFY_PROVIDER"],
+            model: environment["HCG_HERMES_CLARIFY_MODEL"]
         )
     }
 
     public func explain(instructions: String, evidence: String) async throws -> String {
-        let request = Request(instructions: instructions, evidence: evidence)
+        guard (provider == nil) == (model == nil) else {
+            throw HermesStatelessClarifierError.invalidPayload
+        }
+        let request = Request(
+            instructions: instructions,
+            evidence: evidence,
+            provider: provider,
+            model: model
+        )
         guard let input = try? JSONEncoder().encode(request) else {
             throw HermesStatelessClarifierError.invalidPayload
         }
@@ -148,6 +168,8 @@ public struct HermesStatelessClarifier: Sendable {
     private struct Request: Codable {
         let instructions: String
         let evidence: String
+        let provider: String?
+        let model: String?
     }
 
     private static let adapter = #"""
@@ -160,6 +182,15 @@ payload = json.load(sys.stdin)
 
 from agent.oneshot import run_oneshot
 
+main_runtime = None
+if payload.get("provider") and payload.get("model"):
+    from hermes_cli.runtime_provider import resolve_runtime_provider
+    main_runtime = resolve_runtime_provider(
+        requested=payload["provider"],
+        target_model=payload["model"],
+    )
+    main_runtime["model"] = payload["model"]
+
 result = run_oneshot(
     instructions=payload["instructions"],
     user_input=payload["evidence"],
@@ -167,7 +198,12 @@ result = run_oneshot(
     max_tokens=700,
     temperature=0.1,
     timeout=40.0,
+    main_runtime=main_runtime,
 )
 sys.stdout.write(result)
 """#
+}
+
+private extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
 }
