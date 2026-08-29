@@ -94,6 +94,10 @@ The current test suite covers:
 
 An end-to-end disposable trial also verified that a clarification and its evidence survive repeated checksum reconciliation.
 
+## A note from the lab
+
+The first resizable-window stress test produced an unexpectedly memorable piece of synthetic rhetoric: Grok filled the overflow specimen by repeating, “The human remains the authority.” The screenshot and the distinction between experienced emotion and behavior that resembles it are preserved in [The human remains the authority](docs/lab-notes/the-human-remains-the-authority.md).
+
 ## Roadmap
 
 The immediate goal is to make the one-file contract boringly reliable. A later version may generalize the same human-approval boundary to other silently rewritten Hermes state, including skill and pending-skill directories, without moving authority back inside the harness being watched.
