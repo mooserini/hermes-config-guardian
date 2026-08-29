@@ -330,6 +330,30 @@ final class GuardianCoreTests: XCTestCase {
         XCTAssertEqual(clarifier.agentDirectory.standardizedFileURL, agent.standardizedFileURL)
     }
 
+    func testAttentionPreferencesDefaultToSoundWithoutOpeningWindow() throws {
+        let suiteName = "AttentionPreferencesTests.defaults.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let preferences = AttentionPreferences(defaults: defaults)
+        XCTAssertTrue(preferences.playsSound)
+        XCTAssertFalse(preferences.opensReviewWindow)
+    }
+
+    func testAttentionPreferencesPersistIndependentChoices() throws {
+        let suiteName = "AttentionPreferencesTests.persistence.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let preferences = AttentionPreferences(defaults: defaults)
+        preferences.setPlaysSound(false)
+        preferences.setOpensReviewWindow(true)
+
+        let reloaded = AttentionPreferences(defaults: defaults)
+        XCTAssertFalse(reloaded.playsSound)
+        XCTAssertTrue(reloaded.opensReviewWindow)
+    }
+
     func testHermesStatelessClarifierSendsEvidenceOverStandardInput() async throws {
         let fakePython = try makeExecutable(
             named: "fake-python",

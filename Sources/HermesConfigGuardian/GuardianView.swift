@@ -50,6 +50,14 @@ struct GuardianView: View {
                         .help("Open Guardian in a resizable window")
                         .accessibilityHint("Opens the same Guardian state in a resizable window")
                 }
+                Menu {
+                    Toggle("Play attention sound", isOn: $model.attentionSoundEnabled)
+                    Toggle("Open window automatically", isOn: $model.attentionWindowEnabled)
+                } label: {
+                    Label("Attention", systemImage: "bell")
+                }
+                .help("Choose how Guardian gets your attention when the watched file changes")
+                .accessibilityLabel("Attention settings")
                 Spacer(minLength: 8)
                 Button("Quit") { NSApplication.shared.terminate(nil) }
                     .help("Quit Hermes Config Guardian")

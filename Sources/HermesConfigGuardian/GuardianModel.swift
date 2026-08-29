@@ -72,6 +72,12 @@ final class GuardianModel: ObservableObject {
     @Published var explanation: String?
     @Published var clarificationSource: ClarificationSource?
     @Published var isClarifying = false
+    @Published var attentionSoundEnabled: Bool {
+        didSet { attentionPreferences.setPlaysSound(attentionSoundEnabled) }
+    }
+    @Published var attentionWindowEnabled: Bool {
+        didSet { attentionPreferences.setOpensReviewWindow(attentionWindowEnabled) }
+    }
     @Published private(set) var documentationExcerpts: [DocumentationExcerpt] = []
     @Published private(set) var documentationStatus: String?
     @Published private(set) var documentationWarning: String?
@@ -83,15 +89,22 @@ final class GuardianModel: ObservableObject {
     private let documentationClient: HermesDocumentationClient
     private let hermesClarifier: HermesStatelessClarifier?
     private let attentionMarkerURL: URL
-    private let playAttentionSound: @MainActor () -> Void
+    private let performAttentionSound: @MainActor () -> Void
+    private let attentionPreferences: AttentionPreferences
+    private var openAttentionWindow: (@MainActor () -> Void)?
     private var attentionGate: ProposalAttentionGate
     private var watcher: DirectoryWatcher?
     private var reconciliationTimer: Timer?
 
     init(
         environment: [String: String] = ProcessInfo.processInfo.environment,
+        userDefaults: UserDefaults = .standard,
         playAttentionSound: @escaping @MainActor () -> Void = GuardianAttentionSound.play
     ) {
+        let preferences = AttentionPreferences(defaults: userDefaults)
+        attentionPreferences = preferences
+        attentionSoundEnabled = preferences.playsSound
+        attentionWindowEnabled = preferences.opensReviewWindow
         let home = FileManager.default.homeDirectoryForCurrentUser
         sourceURL = URL(fileURLWithPath: environment["HCG_TARGET_CONFIG"] ?? home.appendingPathComponent(".hermes/config.yaml").path)
 
@@ -107,7 +120,7 @@ final class GuardianModel: ObservableObject {
         attentionGate = ProposalAttentionGate(
             lastNotifiedProposalHash: lastNotifiedHash?.isEmpty == false ? lastNotifiedHash : nil
         )
-        self.playAttentionSound = playAttentionSound
+        performAttentionSound = playAttentionSound
         store = ApprovalStore(stateDirectory: stateDirectory)
         let installedDocsPath = environment["HCG_HERMES_DOCS_DIR"]
             ?? home.appendingPathComponent(".hermes/hermes-agent/website/docs", isDirectory: true).path
@@ -160,6 +173,10 @@ final class GuardianModel: ObservableObject {
         } catch {
             status = .error("Enrollment failed: \(error.localizedDescription)")
         }
+    }
+
+    func setAttentionWindowHandler(_ handler: @escaping @MainActor () -> Void) {
+        openAttentionWindow = handler
     }
 
     func checkForChange() {
@@ -349,7 +366,12 @@ final class GuardianModel: ObservableObject {
             [.posixPermissions: 0o600],
             ofItemAtPath: attentionMarkerURL.path
         )
-        playAttentionSound()
+        if attentionSoundEnabled {
+            performAttentionSound()
+        }
+        if attentionWindowEnabled {
+            openAttentionWindow?()
+        }
     }
 
     private func resetAttentionMarker() {
