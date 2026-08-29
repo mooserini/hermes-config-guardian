@@ -1,0 +1,17 @@
+.DS_Store
+.build/
+build/
+.swiftpm/configuration/
+.swiftpm/xcode/package.xcworkspace/xcuserdata/
+DerivedData/
+*.xcuserstate
+
+# Guardian runtime state must never be published.
+documentation-cache/
+receipts/
+snapshots/
+approved.json
+approved.yaml
+current.json
+state/
+test-state/
