@@ -3,10 +3,24 @@ import Yams
 
 public struct InspectedYAML: Equatable, Sendable {
     public let flattenedValues: [String: String]
+    public let flattenedKinds: [String: YAMLValueKind]
 
-    public init(flattenedValues: [String: String]) {
+    public init(flattenedValues: [String: String], flattenedKinds: [String: YAMLValueKind]) {
         self.flattenedValues = flattenedValues
+        self.flattenedKinds = flattenedKinds
     }
+}
+
+public enum YAMLValueKind: String, Codable, Equatable, Sendable {
+    case string
+    case integer
+    case number
+    case boolean
+    case null
+    case sequence
+    case mapping
+
+    public var displayName: String { rawValue }
 }
 
 public enum YAMLInspectionError: LocalizedError {
@@ -41,24 +55,36 @@ public enum YAMLInspector {
         }
 
         var flattened: [String: String] = [:]
-        try flatten(value: loaded, path: "", into: &flattened)
-        return InspectedYAML(flattenedValues: flattened)
+        var kinds: [String: YAMLValueKind] = [:]
+        try flatten(value: loaded, path: "", values: &flattened, kinds: &kinds)
+        return InspectedYAML(flattenedValues: flattened, flattenedKinds: kinds)
     }
 
-    private static func flatten(value: Any, path: String, into result: inout [String: String]) throws {
+    private static func flatten(
+        value: Any,
+        path: String,
+        values result: inout [String: String],
+        kinds: inout [String: YAMLValueKind]
+    ) throws {
         if let dictionary = value as? [String: Any] {
-            if dictionary.isEmpty, !path.isEmpty { result[path] = "{}" }
+            if dictionary.isEmpty, !path.isEmpty {
+                result[path] = "{}"
+                kinds[path] = .mapping
+            }
             for key in dictionary.keys.sorted() {
                 let childPath = path.isEmpty ? key : "\(path).\(key)"
                 if let child = dictionary[key] {
-                    try flatten(value: child, path: childPath, into: &result)
+                    try flatten(value: child, path: childPath, values: &result, kinds: &kinds)
                 }
             }
             return
         }
 
         if let dictionary = value as? [AnyHashable: Any] {
-            if dictionary.isEmpty, !path.isEmpty { result[path] = "{}" }
+            if dictionary.isEmpty, !path.isEmpty {
+                result[path] = "{}"
+                kinds[path] = .mapping
+            }
             let pairs = try dictionary.map { key, value -> (String, Any) in
                 guard let key = key as? String else {
                     throw YAMLInspectionError.unsupportedKey(String(describing: key))
@@ -67,25 +93,41 @@ public enum YAMLInspector {
             }.sorted { $0.0 < $1.0 }
             for (key, child) in pairs {
                 let childPath = path.isEmpty ? key : "\(path).\(key)"
-                try flatten(value: child, path: childPath, into: &result)
+                try flatten(value: child, path: childPath, values: &result, kinds: &kinds)
             }
             return
         }
 
         if let array = value as? [Any] {
-            if array.isEmpty, !path.isEmpty { result[path] = "[]" }
+            if array.isEmpty, !path.isEmpty {
+                result[path] = "[]"
+                kinds[path] = .sequence
+            }
             for (index, child) in array.enumerated() {
-                try flatten(value: child, path: "\(path)[\(index)]", into: &result)
+                try flatten(value: child, path: "\(path)[\(index)]", values: &result, kinds: &kinds)
             }
             return
         }
 
         if value is NSNull {
             result[path] = "null"
+            kinds[path] = .null
         } else if let string = value as? String {
             result[path] = string
+            kinds[path] = .string
+        } else if let boolean = value as? Bool {
+            result[path] = String(describing: boolean)
+            kinds[path] = .boolean
+        } else if value is Int || value is Int8 || value is Int16 || value is Int32 || value is Int64
+                    || value is UInt || value is UInt8 || value is UInt16 || value is UInt32 || value is UInt64 {
+            result[path] = String(describing: value)
+            kinds[path] = .integer
+        } else if value is Float || value is Double || value is Decimal {
+            result[path] = String(describing: value)
+            kinds[path] = .number
         } else {
             result[path] = String(describing: value)
+            kinds[path] = .string
         }
     }
 }

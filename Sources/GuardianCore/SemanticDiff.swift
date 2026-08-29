@@ -11,14 +11,30 @@ public struct SemanticChange: Identifiable, Codable, Equatable, Sendable {
     public let kind: ChangeKind
     public let before: String?
     public let after: String?
+    public let beforeKind: YAMLValueKind?
+    public let afterKind: YAMLValueKind?
 
     public var id: String { path }
 
-    public init(path: String, kind: ChangeKind, before: String?, after: String?) {
+    public var hasTypeTransition: Bool {
+        guard let beforeKind, let afterKind else { return false }
+        return beforeKind != afterKind
+    }
+
+    public init(
+        path: String,
+        kind: ChangeKind,
+        before: String?,
+        after: String?,
+        beforeKind: YAMLValueKind? = nil,
+        afterKind: YAMLValueKind? = nil
+    ) {
         self.path = path
         self.kind = kind
         self.before = before
         self.after = after
+        self.beforeKind = beforeKind
+        self.afterKind = afterKind
     }
 }
 
@@ -32,17 +48,30 @@ public enum SemanticDiffer {
             let before = old[path]
             let after = new[path]
             guard before != after else { return nil }
-            let sensitive = isSensitive(path)
-            let safeBefore = sensitive && before != nil ? "<redacted>" : before
-            let safeAfter = sensitive && after != nil ? "<redacted>" : after
+            let beforeKind = approved.flattenedKinds[path]
+            let afterKind = proposed.flattenedKinds[path]
+            let sensitivePath = isSensitive(path)
+            let safeBefore = before.map {
+                sensitivePath || SensitiveValueDetector.shouldRedact($0) ? "<redacted>" : $0
+            }
+            let safeAfter = after.map {
+                sensitivePath || SensitiveValueDetector.shouldRedact($0) ? "<redacted>" : $0
+            }
 
             if before == nil {
-                return SemanticChange(path: path, kind: .added, before: nil, after: safeAfter)
+                return SemanticChange(path: path, kind: .added, before: nil, after: safeAfter, afterKind: afterKind)
             }
             if after == nil {
-                return SemanticChange(path: path, kind: .removed, before: safeBefore, after: nil)
+                return SemanticChange(path: path, kind: .removed, before: safeBefore, after: nil, beforeKind: beforeKind)
             }
-            return SemanticChange(path: path, kind: .changed, before: safeBefore, after: safeAfter)
+            return SemanticChange(
+                path: path,
+                kind: .changed,
+                before: safeBefore,
+                after: safeAfter,
+                beforeKind: beforeKind,
+                afterKind: afterKind
+            )
         }
     }
 

@@ -379,6 +379,17 @@ struct GuardianView: View {
             } else {
                 Text("Meaningful changes")
                     .font(.subheadline.weight(.semibold))
+                if let warning = TypeTransitionGuard.reviewWarning(for: pending.changes) {
+                    Label {
+                        Text(warning)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } icon: {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .accessibilityLabel("Value type changed")
+                }
                 VStack(alignment: .leading, spacing: 10) {
                     ForEach(pending.changes) { change in
                         VStack(alignment: .leading, spacing: 3) {

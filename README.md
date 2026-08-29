@@ -17,9 +17,11 @@ The design is deliberately small: protect one consequential file well before exp
 - Stores exact approved snapshots and append-only approval or rejection receipts outside Hermes.
 - Verifies snapshots with SHA-256 before restoration.
 - Detects semantic YAML changes while redacting likely credential values in reviews.
+- Redacts credential-shaped values even when they appear beneath unfamiliar or misleading setting names.
 - Offers `Accept`, `Review`, `Clarify`, and one-click `Reject` decisions.
 - Plays the built-in macOS `Glass` alert once for each newly detected proposal while changing the menu-bar shield to its attention state; repeated checksum reconciliation stays silent.
 - Invalid YAML exposes only `Clarify` and `Reject`; Guardian shows the isolated unparsed line locally and never permits acceptance.
+- Scalar type changes are called out in Review and receive a deterministic type-safety explanation; Guardian does not ask a model to equate strings, numbers, booleans, or nulls.
 - Keeps quick decisions in the menu-bar panel and opens the same live state in a resizable window for longer reviews; explanation and evidence overflow stays inside one scrollable details area.
 - Binds clarification to the proposed file hash so a late explanation cannot attach to a newer edit.
 - Uses directory events plus periodic checksum reconciliation; routine checks invoke no model.

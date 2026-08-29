@@ -21,6 +21,7 @@ final class GuardianModel: ObservableObject {
         case hermes(provider: String, model: String, reasoningEffort: String)
         case apple
         case deterministic
+        case typeSafety
 
         var title: String {
             switch self {
@@ -30,6 +31,8 @@ final class GuardianModel: ObservableObject {
                 return "Apple on-device fallback"
             case .deterministic:
                 return "Deterministic fallback"
+            case .typeSafety:
+                return "Type safety check"
             }
         }
     }
@@ -287,7 +290,10 @@ final class GuardianModel: ObservableObject {
             documentationStatus = documentation.agreement.message
             documentationWarning = documentation.warning
 
-            if documentation.excerpts.isEmpty,
+            if let warning = TypeTransitionGuard.explanation(for: pending.changes) {
+                explanation = warning
+                clarificationSource = .typeSafety
+            } else if documentation.excerpts.isEmpty,
                let verified = Self.verifiedExplanation(for: pending) {
                 explanation = verified
             } else if documentation.excerpts.isEmpty {

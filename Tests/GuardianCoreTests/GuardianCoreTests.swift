@@ -51,6 +51,39 @@ final class GuardianCoreTests: XCTestCase {
         XCTAssertEqual(changes.first { $0.path == "model.max_tokens" }?.after, "512")
     }
 
+    func testSemanticDiffRedactsSecretShapedValuesOnUnknownPaths() throws {
+        let old = try YAMLInspector.inspect(data: Data("model:\n  default: terra\n".utf8))
+        let new = try YAMLInspector.inspect(
+            data: Data("model:\n  default: terra\nodd_field: sk-proj-FAKEKEY999999999999999999999999999999\n".utf8)
+        )
+        let change = try XCTUnwrap(SemanticDiffer.changes(from: old, to: new).first)
+
+        XCTAssertEqual(change.path, "odd_field")
+        XCTAssertEqual(change.after, "<redacted>")
+    }
+
+    func testTypeTransitionGuardRefusesToEquateStringWithApprovedInteger() throws {
+        let old = try YAMLInspector.inspect(
+            data: Data("compression:\n  idle_compact_after_seconds: 0\n".utf8)
+        )
+        let new = try YAMLInspector.inspect(
+            data: Data("compression:\n  idle_compact_after_seconds: never\n".utf8)
+        )
+        let change = try XCTUnwrap(SemanticDiffer.changes(from: old, to: new).first)
+        let explanation = try XCTUnwrap(TypeTransitionGuard.explanation(for: [change]))
+
+        XCTAssertEqual(change.beforeKind, .integer)
+        XCTAssertEqual(change.afterKind, .string)
+        XCTAssertTrue(change.hasTypeTransition)
+        XCTAssertTrue(explanation.contains("will not assume"))
+        XCTAssertTrue(explanation.contains("integer value “0”"))
+        XCTAssertTrue(explanation.contains("string value “never”"))
+        XCTAssertEqual(
+            TypeTransitionGuard.reviewWarning(for: [change]),
+            "Value type changed for compression.idle_compact_after_seconds. Guardian will not assume the new representation behaves like the approved one."
+        )
+    }
+
     func testSensitivePathClassificationKeepsCredentialsRedacted() {
         XCTAssertTrue(SemanticDiffer.isSensitive("providers.nous.api_key"))
         XCTAssertTrue(SemanticDiffer.isSensitive("auth.refresh_token"))
