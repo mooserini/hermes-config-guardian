@@ -12,3 +12,7 @@ Hermes Config Guardian intentionally stores approved configuration bytes and int
 - Test changes against a disposable configuration and isolated state directory.
 - Never publish snapshots, receipts, documentation caches, or a live Hermes configuration.
 - Review the current sentry boundary: Guardian detects completed writes; it does not prevent the original write from occurring.
+
+## Clarification inference boundary
+
+Clarify retrieves public Hermes documentation separately from model inference. The documentation server receives no configuration contents. The selected inference provider receives bounded documentation excerpts plus redacted semantic changes, never the complete configuration file. Redaction reduces exposure but cannot guarantee that every structurally sensitive value or path is removed; provider retention and training terms may apply. Do not press Clarify for a proposed change whose redacted review still contains information you are unwilling to transmit.

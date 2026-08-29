@@ -201,7 +201,7 @@ final class GuardianCoreTests: XCTestCase {
               *) exit 92 ;;
             esac
             case "$payload" in
-              *laguna-xs-2.1:free*) printf 'Human explanation from Hermes.' ;;
+              *laguna-xs-2.1:free*) printf '%s' '{"text":"Human explanation from Hermes.","provider":"nous","model":"poolside/laguna-xs-2.1:free"}' ;;
               *) exit 93 ;;
             esac
             """
@@ -218,7 +218,9 @@ final class GuardianCoreTests: XCTestCase {
             instructions: "Use only the supplied documentation.",
             evidence: "guardian-secret"
         )
-        XCTAssertEqual(response, "Human explanation from Hermes.")
+        XCTAssertEqual(response.text, "Human explanation from Hermes.")
+        XCTAssertEqual(response.provider, "nous")
+        XCTAssertEqual(response.model, "poolside/laguna-xs-2.1:free")
     }
 
     func testHermesStatelessClarifierRejectsHalfConfiguredRoutePin() async throws {
@@ -271,7 +273,7 @@ final class GuardianCoreTests: XCTestCase {
         let clarifier = try XCTUnwrap(HermesStatelessClarifier.discover())
         let response = try await clarifier.explain(
             instructions: """
-            Translate the Hermes configuration change into plain human language. Use only the supplied documentation. Say what the person will notice, cite [1], and return only the explanation.
+            Translate the Hermes configuration change into plain human language. Use only the supplied documentation. Preserve qualifiers exactly: never turn may or eligible behavior into will or unconditional behavior. Say what the person will notice, cite [1], and return only the explanation.
             """,
             evidence: """
             [1] Installed Hermes documentation
@@ -281,9 +283,11 @@ final class GuardianCoreTests: XCTestCase {
             compression.idle_compact_after_seconds: 0 -> 300
             """
         )
-        print("LIVE_HERMES_CLARIFICATION:\n\(response)")
-        XCTAssertTrue(response.contains("[1]"))
-        XCTAssertFalse(response.isEmpty)
+        print("LIVE_HERMES_ROUTE: \(response.provider)/\(response.model)")
+        print("LIVE_HERMES_CLARIFICATION:\n\(response.text)")
+        XCTAssertTrue(response.text.contains("[1]"))
+        XCTAssertTrue(response.text.lowercased().contains("may"))
+        XCTAssertFalse(response.text.isEmpty)
     }
 
     private func makeExecutable(named name: String, contents: String) throws -> URL {

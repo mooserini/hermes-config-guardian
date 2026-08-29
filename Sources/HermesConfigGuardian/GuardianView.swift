@@ -114,7 +114,7 @@ struct GuardianView: View {
 
             if let explanation = model.explanation {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(model.clarificationSource?.rawValue ?? "Grounded explanation")
+                    Text(model.clarificationSource?.title ?? "Grounded explanation")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                     Text(explanation)

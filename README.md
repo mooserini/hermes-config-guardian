@@ -28,16 +28,17 @@ Guardian currently detects completed writes. It is not a privileged pre-write fi
 Clarify searches the Hermes documentation installed with the local Hermes build first, then checks the official hosted `llms-full.txt` corpus.
 
 - Only bounded passages matching changed setting paths are given to Hermes' stateless model-call helper.
-- The configured Hermes provider and main model are reused without loading tools, memory, rules, skills, a conversation, or a session.
+- Nous' current free model recommendation for short auxiliary summaries is resolved at call time and used without loading tools, memory, rules, skills, a conversation, or a session.
 - The exact evidence and official source link remain visible beneath the explanation.
 - Guardian reports whether installed and hosted passages agree.
 - If no exact passage is found, Guardian does not ask the model to infer the setting's behavior.
 - The hosted corpus is capped at 10 MB, cached for six hours with owner-only permissions, and refreshed using `ETag` and `Last-Modified` validators.
-- Configuration contents are never sent to the documentation server. The only network request retrieves public documentation.
+- Configuration contents are never sent to the documentation server; that request retrieves only public documentation.
+- When the user presses Clarify, the selected inference provider receives bounded documentation excerpts and the redacted semantic changes, not the complete configuration file. Provider retention and training terms may still apply to that payload.
 
-Hermes stateless inference is the primary explanation rail. Apple's on-device Foundation Model is an optional fallback, followed by deterministic behavior when neither model is available.
+Hermes stateless inference through Nous' current free auxiliary recommendation is the primary explanation rail. Apple's on-device Foundation Model is an optional fallback, followed by deterministic behavior when neither model is available.
 
-For controlled comparisons, `HCG_HERMES_CLARIFY_PROVIDER` and `HCG_HERMES_CLARIFY_MODEL` may be set together to pin a single stateless clarification route without changing the watched Hermes configuration. Normal use leaves both unset and follows the configured main provider and model.
+For controlled comparisons, `HCG_HERMES_CLARIFY_PROVIDER` and `HCG_HERMES_CLARIFY_MODEL` may be set together to pin a single stateless clarification route without changing the watched Hermes configuration. Normal use leaves both unset and follows Nous' live free compaction/summarization recommendation.
 
 ## Build and test
 

@@ -23,6 +23,12 @@ public enum HermesStatelessClarifierError: Error, LocalizedError, Equatable {
     }
 }
 
+public struct HermesClarification: Sendable, Equatable {
+    public let text: String
+    public let provider: String
+    public let model: String
+}
+
 /// A deliberately narrow bridge to Hermes' internal stateless LLM helper.
 ///
 /// Unlike `hermes -z`, this helper does not construct an agent, load tools,
@@ -90,7 +96,7 @@ public struct HermesStatelessClarifier: Sendable {
         )
     }
 
-    public func explain(instructions: String, evidence: String) async throws -> String {
+    public func explain(instructions: String, evidence: String) async throws -> HermesClarification {
         guard (provider == nil) == (model == nil) else {
             throw HermesStatelessClarifierError.invalidPayload
         }
@@ -109,7 +115,7 @@ public struct HermesStatelessClarifier: Sendable {
         }.value
     }
 
-    private func run(input: Data) throws -> String {
+    private func run(input: Data) throws -> HermesClarification {
         let process = Process()
         let standardInput = Pipe()
         let standardOutput = Pipe()
@@ -157,12 +163,15 @@ public struct HermesStatelessClarifier: Sendable {
             throw HermesStatelessClarifierError.failed(process.terminationStatus)
         }
         guard output.count <= 64 * 1024,
-              let response = String(data: output, encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines),
-              !response.isEmpty else {
+              let response = try? JSONDecoder().decode(Response.self, from: output),
+              !response.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw HermesStatelessClarifierError.emptyResponse
         }
-        return response
+        return HermesClarification(
+            text: response.text.trimmingCharacters(in: .whitespacesAndNewlines),
+            provider: response.provider,
+            model: response.model
+        )
     }
 
     private struct Request: Codable {
@@ -170,6 +179,12 @@ public struct HermesStatelessClarifier: Sendable {
         let evidence: String
         let provider: String?
         let model: String?
+    }
+
+    private struct Response: Codable {
+        let text: String
+        let provider: String
+        let model: String
     }
 
     private static let adapter = #"""
@@ -182,14 +197,21 @@ payload = json.load(sys.stdin)
 
 from agent.oneshot import run_oneshot
 
-main_runtime = None
-if payload.get("provider") and payload.get("model"):
-    from hermes_cli.runtime_provider import resolve_runtime_provider
-    main_runtime = resolve_runtime_provider(
-        requested=payload["provider"],
-        target_model=payload["model"],
-    )
-    main_runtime["model"] = payload["model"]
+route_provider = payload.get("provider")
+route_model = payload.get("model")
+if not route_provider and not route_model:
+    from hermes_cli.models import get_nous_recommended_aux_model
+    route_provider = "nous"
+    route_model = get_nous_recommended_aux_model(free_tier=True)
+    if not route_model:
+        raise RuntimeError("Nous did not publish a free auxiliary model")
+
+from hermes_cli.runtime_provider import resolve_runtime_provider
+main_runtime = resolve_runtime_provider(
+    requested=route_provider,
+    target_model=route_model,
+)
+main_runtime["model"] = route_model
 
 result = run_oneshot(
     instructions=payload["instructions"],
@@ -200,7 +222,11 @@ result = run_oneshot(
     timeout=40.0,
     main_runtime=main_runtime,
 )
-sys.stdout.write(result)
+sys.stdout.write(json.dumps({
+    "text": result,
+    "provider": route_provider,
+    "model": route_model,
+}))
 """#
 }
 
