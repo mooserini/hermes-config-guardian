@@ -125,6 +125,24 @@ org.hermesconfigguardian.app
 The running process was also verified to originate from that installed
 application bundle rather than a temporary build product.
 
+## Cold-start validation
+
+The human operator then closed other applications, left Guardian running, and
+restarted macOS normally. Guardian was not launched manually after login.
+
+Machine timestamps recorded:
+
+```text
+macOS boot:       2026-08-29 03:23:34 EDT
+Guardian launch: 2026-08-29 03:23:54 EDT
+```
+
+Guardian therefore relaunched from its installed application bundle 20 seconds
+after boot through the registered login item. The human observed its menu-bar
+icon before another ordinary menu-bar application had completed startup. After
+launch, the live Hermes configuration and the durable approved snapshot still
+shared the exact baseline SHA-256 fingerprint.
+
 ## Machine receipts
 
 Guardian's private append-only receipt directory contained:
@@ -148,12 +166,14 @@ safe fields were independently checked after each decision.
 - Human-selectable interruption behavior works in the production app.
 - Launch at Login is registered, enabled, human-visible, and reversible through
   macOS System Settings.
+- Guardian survives a real restart, relaunches without human intervention, and
+  recovers its durable approved state.
 
 ## What this does not prove
 
 - Guardian does not yet block unapproved bytes from being read before review.
-- Registration does not yet prove that Guardian successfully launches after an
-  actual logout, login, or reboot; that requires observing a fresh session.
+- One successful restart does not yet establish behavior across macOS upgrades,
+  damaged login-item state, or repeated long-term restarts.
 - The Nous failure reason was not persisted at the tested revision.
 - One guarded file does not establish safe semantics for directories or
   multi-file transactions.
