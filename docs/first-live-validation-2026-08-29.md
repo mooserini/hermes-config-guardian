@@ -105,6 +105,25 @@ unmodified source artifacts without publishing the pixels.
 | Clean approved state and Attention menu | `90d6b9c4b195d8097a1b4352a693abdf3a7615edb9a3afe978b787f8f90c3a3c` |
 | Original zero-setting deterministic explanation | `ddcdebacd0c3847d28b4ed676b6b14726d095568c3dfcc571c0ec2dfb8aae488` |
 | Refined byte-only explanation | `378a68f81220fa067f0281554efcfdbc3f46e5a4f83c62494d36af8cecfe1b1f` |
+| macOS Open at Login registration | `c72b85322a53670cb169ef0db989daa0bca2147f241adbaeb82cb0242df17606` |
+
+## Launch at Login registration
+
+The installed application opted into macOS Launch at Login from its stable
+location under the human operator's Applications directory. macOS presented a
+normal login-item notification and opened the relevant System Settings page,
+where Hermes Config Guardian was visibly listed and could be disabled by the
+human.
+
+The operating system's background-task record independently reported the item
+as `enabled`, `allowed`, and `notified`, with bundle identifier:
+
+```text
+org.hermesconfigguardian.app
+```
+
+The running process was also verified to originate from that installed
+application bundle rather than a temporary build product.
 
 ## Machine receipts
 
@@ -127,11 +146,14 @@ safe fields were independently checked after each decision.
   changing approval state.
 - Reject restores the exact approved bytes and records the decision.
 - Human-selectable interruption behavior works in the production app.
+- Launch at Login is registered, enabled, human-visible, and reversible through
+  macOS System Settings.
 
 ## What this does not prove
 
 - Guardian does not yet block unapproved bytes from being read before review.
-- A single live session does not prove launch-at-login or reboot survival.
+- Registration does not yet prove that Guardian successfully launches after an
+  actual logout, login, or reboot; that requires observing a fresh session.
 - The Nous failure reason was not persisted at the tested revision.
 - One guarded file does not establish safe semantics for directories or
   multi-file transactions.
