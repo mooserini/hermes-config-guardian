@@ -194,6 +194,106 @@ final class GuardianCoreTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: source), approvedData)
     }
 
+    func testMaintenanceStoreSurvivesReloadAndVerifiesCheckpoint() throws {
+        let source = temporaryDirectory.appendingPathComponent("config.yaml")
+        let state = temporaryDirectory.appendingPathComponent("state", isDirectory: true)
+        let data = Data("model:\n  default: terra\n".utf8)
+        try data.write(to: source)
+
+        let approvalStore = ApprovalStore(stateDirectory: state)
+        let approved = try approvalStore.approve(sourceURL: source, data: data)
+        let store = MaintenanceStore(stateDirectory: state)
+        let started = Date(timeIntervalSince1970: 1_700_000_100)
+        let window = try store.begin(
+            sourceURL: source,
+            approvedSnapshot: approved,
+            at: started
+        )
+        let reloaded = try XCTUnwrap(MaintenanceStore(stateDirectory: state).loadActive())
+
+        XCTAssertEqual(reloaded.manifest, window.manifest)
+        XCTAssertEqual(reloaded.checkpointData, data)
+        XCTAssertEqual(reloaded.manifest.startedAt, started)
+
+        let checkpoint = state
+            .appendingPathComponent("maintenance/checkpoints", isDirectory: true)
+            .appendingPathComponent(window.manifest.checkpointFileName)
+        let permissions = try XCTUnwrap(
+            FileManager.default.attributesOfItem(atPath: checkpoint.path)[.posixPermissions] as? NSNumber
+        )
+        XCTAssertEqual(permissions.intValue & 0o777, 0o600)
+    }
+
+    func testMaintenanceStoreRecordsOnlyDistinctProposalFingerprints() throws {
+        let source = temporaryDirectory.appendingPathComponent("config.yaml")
+        let state = temporaryDirectory.appendingPathComponent("state", isDirectory: true)
+        let data = Data("value: approved\n".utf8)
+        try data.write(to: source)
+        let approved = try ApprovalStore(stateDirectory: state)
+            .approve(sourceURL: source, data: data)
+        let store = MaintenanceStore(stateDirectory: state)
+        _ = try store.begin(sourceURL: source, approvedSnapshot: approved)
+
+        XCTAssertEqual(try store.recordObservation(fingerprint: "proposal-a"), 1)
+        XCTAssertEqual(try store.recordObservation(fingerprint: "proposal-a"), 1)
+        XCTAssertEqual(try store.recordObservation(fingerprint: "proposal-b"), 2)
+        XCTAssertEqual(try MaintenanceStore(stateDirectory: state).observationCount(), 2)
+    }
+
+    func testMaintenanceCheckpointTamperingIsRejected() throws {
+        let source = temporaryDirectory.appendingPathComponent("config.yaml")
+        let state = temporaryDirectory.appendingPathComponent("state", isDirectory: true)
+        let data = Data("value: approved\n".utf8)
+        try data.write(to: source)
+        let approved = try ApprovalStore(stateDirectory: state)
+            .approve(sourceURL: source, data: data)
+        let store = MaintenanceStore(stateDirectory: state)
+        let window = try store.begin(sourceURL: source, approvedSnapshot: approved)
+        let checkpoint = state
+            .appendingPathComponent("maintenance/checkpoints", isDirectory: true)
+            .appendingPathComponent(window.manifest.checkpointFileName)
+        try Data("value: tampered\n".utf8).write(to: checkpoint)
+
+        XCTAssertThrowsError(try store.loadActive()) { error in
+            guard case MaintenanceStoreError.checkpointHashMismatch = error else {
+                return XCTFail("Expected checkpoint hash mismatch, got \(error)")
+            }
+        }
+    }
+
+    func testEndingMaintenanceClearsActiveManifestButPreservesCheckpoint() throws {
+        let source = temporaryDirectory.appendingPathComponent("config.yaml")
+        let state = temporaryDirectory.appendingPathComponent("state", isDirectory: true)
+        let data = Data("value: approved\n".utf8)
+        try data.write(to: source)
+        let approved = try ApprovalStore(stateDirectory: state)
+            .approve(sourceURL: source, data: data)
+        let store = MaintenanceStore(stateDirectory: state)
+        let window = try store.begin(sourceURL: source, approvedSnapshot: approved)
+        try store.endActive()
+
+        XCTAssertNil(try store.loadActive())
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: state
+                    .appendingPathComponent("maintenance/checkpoints", isDirectory: true)
+                    .appendingPathComponent(window.manifest.checkpointFileName).path
+            )
+        )
+        let historyRoot = state
+            .appendingPathComponent("maintenance/history", isDirectory: true)
+        let historySessions = try FileManager.default.contentsOfDirectory(
+            at: historyRoot,
+            includingPropertiesForKeys: nil
+        )
+        let history = try XCTUnwrap(historySessions.first)
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: history.appendingPathComponent("manifest.json").path
+            )
+        )
+    }
+
     func testRejectionReceiptRecordsHashesAndPathsWithoutRejectedContents() throws {
         let source = temporaryDirectory.appendingPathComponent("config.yaml")
         let state = temporaryDirectory.appendingPathComponent("state", isDirectory: true)

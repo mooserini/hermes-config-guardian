@@ -1,5 +1,9 @@
 # Durable maintenance window
 
+**Implementation status:** available in the macOS application as **Begin
+Hermes update** and **End update and review**. The original design contract is
+retained below as the behavioral specification.
+
 ## Purpose
 
 Hermes updates and setup flows may rewrite `config.yaml` more than once. A

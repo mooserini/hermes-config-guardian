@@ -25,6 +25,7 @@ The design is deliberately small: protect one consequential file well before exp
 - Keeps quick decisions in the menu-bar panel and opens the same live state in a resizable window for longer reviews; explanation and evidence overflow stays inside one scrollable details area.
 - Binds clarification to the proposed file hash so a late explanation cannot attach to a newer edit.
 - Uses directory events plus periodic checksum reconciliation; routine checks invoke no model.
+- Brackets intentional Hermes updates with a durable maintenance window: Guardian seals the approved bytes, records distinct intermediate rewrites without bell spam, survives relaunch, and still requires a final human Accept or Reject decision.
 
 Guardian currently detects completed writes. It is not a privileged pre-write firewall and cannot prevent another process from briefly writing the watched file before detection.
 
@@ -80,6 +81,29 @@ Attention menu. macOS may require the user to approve the login item in System
 Settings. Guardian reports that state instead of treating registration as
 successful.
 
+## Intentional Hermes updates
+
+When Guardian reports a clean approved configuration, select **Begin Hermes
+update** before running a Hermes updater or setup flow. Guardian creates a
+verified owner-only checkpoint and visibly enters maintenance mode. It keeps
+watching every distinct rewrite but suppresses repeated sound and window
+interruptions.
+
+After the updater is completely finished, select **End update and review**.
+Guardian compares the final bytes with the sealed checkpoint. It never accepts
+the result automatically:
+
+- **Accept final version** approves only the final stable proposal.
+- **Reject and restore checkpoint** writes back the exact pre-update bytes and
+  warns that a newer Hermes build may require a migrated schema.
+- **Keep updating** returns to maintenance without changing either file.
+
+If Guardian, the login session, or the Mac restarts during maintenance, the
+checkpoint, start time, and distinct-proposal count are recovered from private
+durable state. When maintenance ends, its manifest and hash-only observation
+log move into owner-only history; the corresponding approval or rejection
+receipt remains the authority for the final decision.
+
 ## Disposable-file trial
 
 Test with a disposable YAML file and isolated state directory before pointing Guardian at a real configuration:
@@ -107,6 +131,8 @@ The current test suite covers:
 - atomic file replacement detection;
 - clean scalar presentation;
 - exact documentation extraction and canonical source preservation.
+- durable maintenance recovery, distinct rapid rewrites, no-change and
+  byte-only update results, invalid final YAML, and exact checkpoint rejection.
 
 An end-to-end disposable trial also verified that a clarification and its evidence survive repeated checksum reconciliation.
 
@@ -122,7 +148,7 @@ The evidence and limits from the first trial against a real Hermes configuration
 
 The immediate goal is to make the one-file contract boringly reliable. A later version may generalize the same human-approval boundary to other silently rewritten Hermes state, including skill and pending-skill directories, without moving authority back inside the harness being watched.
 
-A planned [durable maintenance window](docs/design/durable-maintenance-window.md) will group the many writes made by an intentional Hermes update into one final human review without granting the updater automatic approval.
+The implemented [durable maintenance window](docs/design/durable-maintenance-window.md) groups the many writes made by an intentional Hermes update into one final human review without granting the updater automatic approval.
 
 ## Runtime privacy
 

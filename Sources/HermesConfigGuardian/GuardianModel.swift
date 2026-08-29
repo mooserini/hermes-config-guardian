@@ -44,6 +44,7 @@ final class GuardianModel: ObservableObject {
     enum Status: Equatable {
         case unenrolled
         case clean
+        case maintenance
         case changed(Int)
         case invalid
         case error(String)
@@ -52,6 +53,7 @@ final class GuardianModel: ObservableObject {
             switch self {
             case .unenrolled: return "Ready to enroll"
             case .clean: return "Configuration approved"
+            case .maintenance: return "Hermes update in progress"
             case let .changed(count):
                 return count == 0
                     ? "File rewrite needs attention"
@@ -65,6 +67,7 @@ final class GuardianModel: ObservableObject {
             switch self {
             case .unenrolled: return "shield"
             case .clean: return "checkmark.shield.fill"
+            case .maintenance: return "wrench.and.screwdriver.fill"
             case .changed: return "exclamationmark.shield.fill"
             case .invalid, .error: return "xmark.shield.fill"
             }
@@ -74,6 +77,10 @@ final class GuardianModel: ObservableObject {
     @Published private(set) var status: Status = .unenrolled
     @Published private(set) var pending: PendingChange?
     @Published private(set) var approved: ApprovedSnapshot?
+    @Published private(set) var maintenance: MaintenanceWindow?
+    @Published private(set) var maintenanceObservedCount = 0
+    @Published private(set) var maintenanceReviewReady = false
+    @Published private(set) var maintenanceMessage: String?
     @Published var reviewExpanded = false
     @Published var documentationExpanded = false
     @Published var explanation: String?
@@ -96,6 +103,7 @@ final class GuardianModel: ObservableObject {
     let stateDirectory: URL
 
     private let store: ApprovalStore
+    private let maintenanceStore: MaintenanceStore
     private let documentationClient: HermesDocumentationClient
     private let hermesClarifier: HermesStatelessClarifier?
     private let attentionMarkerURL: URL
@@ -132,6 +140,7 @@ final class GuardianModel: ObservableObject {
         )
         performAttentionSound = playAttentionSound
         store = ApprovalStore(stateDirectory: stateDirectory)
+        maintenanceStore = MaintenanceStore(stateDirectory: stateDirectory)
         let installedDocsPath = environment["HCG_HERMES_DOCS_DIR"]
             ?? home.appendingPathComponent(".hermes/hermes-agent/website/docs", isDirectory: true).path
         documentationClient = HermesDocumentationClient(
@@ -146,7 +155,17 @@ final class GuardianModel: ObservableObject {
 
         do {
             approved = try store.loadApproved()
-            status = approved == nil ? .unenrolled : .clean
+            if approved == nil {
+                status = .unenrolled
+            } else {
+                maintenance = try maintenanceStore.loadActive()
+                if let maintenance,
+                   maintenance.manifest.sourcePath != sourceURL.standardizedFileURL.path {
+                    throw CocoaError(.fileReadCorruptFile)
+                }
+                maintenanceObservedCount = try maintenanceStore.observationCount()
+                status = maintenance == nil ? .clean : .maintenance
+            }
         } catch {
             status = .error(error.localizedDescription)
         }
@@ -177,6 +196,10 @@ final class GuardianModel: ObservableObject {
             _ = try YAMLInspector.inspect(data: data)
             approved = try store.approve(sourceURL: sourceURL, data: data)
             pending = nil
+            maintenance = nil
+            maintenanceObservedCount = 0
+            maintenanceReviewReady = false
+            maintenanceMessage = nil
             clearClarification()
             reviewExpanded = false
             resetAttentionMarker()
@@ -235,6 +258,67 @@ final class GuardianModel: ObservableObject {
         SMAppService.openSystemSettingsLoginItems()
     }
 
+    func beginHermesUpdate() {
+        guard maintenance == nil else { return }
+        guard let approved, pending == nil else {
+            status = .error("Resolve the current proposal before beginning a Hermes update.")
+            return
+        }
+        do {
+            let current = try Data(contentsOf: sourceURL)
+            guard ApprovalStore.sha256(current) == approved.manifest.approvedHash else {
+                checkForChange()
+                status = .error("The file no longer matches the approved snapshot. Resolve it before beginning a Hermes update.")
+                return
+            }
+            _ = try YAMLInspector.inspect(data: current)
+            maintenance = try maintenanceStore.begin(
+                sourceURL: sourceURL,
+                approvedSnapshot: approved
+            )
+            maintenanceObservedCount = 0
+            maintenanceReviewReady = false
+            maintenanceMessage = nil
+            clearClarification()
+            resetAttentionMarker()
+            status = .maintenance
+        } catch {
+            status = .error("Could not begin maintenance: \(error.localizedDescription)")
+        }
+    }
+
+    func endHermesUpdateAndReview() {
+        guard let maintenance else { return }
+        do {
+            let current = try Data(contentsOf: sourceURL)
+            let currentHash = ApprovalStore.sha256(current)
+            if currentHash == maintenance.manifest.approvedHash {
+                try maintenanceStore.endActive()
+                self.maintenance = nil
+                maintenanceObservedCount = 0
+                maintenanceReviewReady = false
+                pending = nil
+                clearClarification()
+                resetAttentionMarker()
+                maintenanceMessage = "Hermes update finished without changing the guarded file."
+                status = .clean
+                return
+            }
+            maintenanceReviewReady = true
+            maintenanceMessage = nil
+            checkForChange()
+        } catch {
+            status = .error("Could not finish maintenance review: \(error.localizedDescription)")
+        }
+    }
+
+    func keepMaintenanceActive() {
+        guard maintenance != nil else { return }
+        maintenanceReviewReady = false
+        clearClarification()
+        checkForChange()
+    }
+
     func checkForChange() {
         guard let approved else { return }
         do {
@@ -244,7 +328,7 @@ final class GuardianModel: ObservableObject {
                 pending = nil
                 clearClarification()
                 resetAttentionMarker()
-                status = .clean
+                status = maintenance == nil ? .clean : .maintenance
                 return
             }
 
@@ -261,7 +345,9 @@ final class GuardianModel: ObservableObject {
                     validationError: nil,
                     invalidFragment: nil
                 )
-                status = .changed(changes.count)
+                status = maintenance != nil && !maintenanceReviewReady
+                    ? .maintenance
+                    : .changed(changes.count)
             } catch {
                 pending = PendingChange(
                     proposedData: current,
@@ -276,7 +362,13 @@ final class GuardianModel: ObservableObject {
                 clearClarification()
                 isClarifying = false
             }
-            notifyIfNeeded(proposalHash: hash)
+            if maintenance != nil {
+                maintenanceObservedCount = try maintenanceStore.recordObservation(
+                    fingerprint: hash
+                )
+            } else {
+                notifyIfNeeded(proposalHash: hash)
+            }
         } catch {
             status = .error("Could not read the watched file: \(error.localizedDescription)")
         }
@@ -284,6 +376,7 @@ final class GuardianModel: ObservableObject {
 
     func accept() {
         guard let pending, pending.validationError == nil else { return }
+        if maintenance != nil && !maintenanceReviewReady { return }
         do {
             let latest = try Data(contentsOf: sourceURL)
             guard ApprovalStore.sha256(latest) == pending.proposedHash else {
@@ -291,11 +384,18 @@ final class GuardianModel: ObservableObject {
                 status = .error("The file changed again before approval. Review the newest version.")
                 return
             }
+            if maintenance != nil {
+                try maintenanceStore.endActive()
+                maintenance = nil
+                maintenanceObservedCount = 0
+                maintenanceReviewReady = false
+            }
             approved = try store.approve(sourceURL: sourceURL, data: latest)
             self.pending = nil
             clearClarification()
             reviewExpanded = false
             resetAttentionMarker()
+            maintenanceMessage = "The final Hermes update result is now the approved configuration."
             status = .clean
         } catch {
             status = .error("Approval failed: \(error.localizedDescription)")
@@ -303,7 +403,7 @@ final class GuardianModel: ObservableObject {
     }
 
     func restore() {
-        guard let approved else { return }
+        guard maintenance == nil, let approved else { return }
         do {
             try store.restore(approved, to: sourceURL)
             pending = nil
@@ -318,6 +418,7 @@ final class GuardianModel: ObservableObject {
 
     func reject() {
         guard let approved else { return }
+        if maintenance != nil && !maintenanceReviewReady { return }
         do {
             let rejectedData = try Data(contentsOf: sourceURL)
             var changedPaths = pending?.changes.map(\.path) ?? []
@@ -331,7 +432,22 @@ final class GuardianModel: ObservableObject {
                 approvedSnapshot: approved,
                 changedPaths: changedPaths
             )
-            try store.restore(approved, to: sourceURL)
+            if let maintenance {
+                guard approved.manifest.approvedHash == maintenance.manifest.approvedHash else {
+                    throw MaintenanceStoreError.checkpointHashMismatch(
+                        expected: maintenance.manifest.approvedHash,
+                        actual: approved.manifest.approvedHash
+                    )
+                }
+                try maintenanceStore.restoreCheckpoint(maintenance, to: sourceURL)
+                try maintenanceStore.endActive()
+                self.maintenance = nil
+                maintenanceObservedCount = 0
+                maintenanceReviewReady = false
+                maintenanceMessage = "The final update result was rejected and the exact pre-update checkpoint was restored. Hermes may require a newer configuration schema."
+            } else {
+                try store.restore(approved, to: sourceURL)
+            }
             pending = nil
             clearClarification()
             reviewExpanded = false

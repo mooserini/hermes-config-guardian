@@ -17,6 +17,8 @@ struct GuardianView: View {
             Group {
                 if model.approved == nil {
                     enrollment
+                } else if model.maintenance != nil && !model.maintenanceReviewReady {
+                    maintenanceActiveView
                 } else if let pending = model.pending {
                     pendingView(pending)
                 } else {
@@ -133,7 +135,7 @@ struct GuardianView: View {
     }
 
     private var cleanView: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             Label("The file matches its approved snapshot.", systemImage: "checkmark.circle.fill")
                 .foregroundStyle(.green)
                 .symbolRenderingMode(.hierarchical)
@@ -147,14 +149,77 @@ struct GuardianView: View {
                     .textSelection(.enabled)
                     .help("SHA-256 fingerprint of the approved snapshot")
             }
+            if let message = model.maintenanceMessage {
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Button("Begin Hermes update") { model.beginHermesUpdate() }
+                .buttonStyle(.bordered)
+                .help("Seal the current approved configuration before intentionally updating Hermes")
+                .accessibilityHint("Begins a durable maintenance window without approving later changes")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
+    }
+
+    private var maintenanceActiveView: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let maintenance = model.maintenance {
+                Label("Maintenance active", systemImage: "wrench.and.screwdriver.fill")
+                    .font(.headline)
+                    .foregroundStyle(.blue)
+                Text("Started \(maintenance.manifest.startedAt.formatted(date: .abbreviated, time: .shortened))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text("Guardian sealed the exact approved configuration and is recording distinct rewrites without repeatedly interrupting you.")
+                    .font(.subheadline)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("\(model.maintenanceObservedCount) distinct intermediate proposal\(model.maintenanceObservedCount == 1 ? "" : "s") observed")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+
+                if case .invalid = model.status {
+                    Label("The current file is invalid YAML. The pre-update checkpoint remains intact.", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Button("End update and review") { model.endHermesUpdateAndReview() }
+                    .buttonStyle(.borderedProminent)
+                    .help("Compare the final stable file with the sealed pre-update checkpoint")
+                    .accessibilityHint("Opens a final review without automatically accepting the result")
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private func maintenanceReviewBanner(_ maintenance: MaintenanceWindow) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Label("Final update review", systemImage: "checkmark.seal")
+                .font(.subheadline.weight(.semibold))
+            Text("\(model.maintenanceObservedCount) distinct intermediate proposal\(model.maintenanceObservedCount == 1 ? "" : "s") observed since \(maintenance.manifest.startedAt.formatted(date: .abbreviated, time: .shortened)). Nothing has been approved automatically.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Label("Reject restores the exact pre-update bytes. The updated Hermes version may require a newer configuration schema; Guardian has not proven runtime compatibility.", systemImage: "exclamationmark.triangle")
+                .font(.caption)
+                .foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.blue.opacity(0.10), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
     @ViewBuilder
     private func pendingView(_ pending: PendingChange) -> some View {
         VStack(alignment: .leading, spacing: 12) {
+            if let maintenance = model.maintenance {
+                maintenanceReviewBanner(maintenance)
+            }
             if let validationError = pending.validationError {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("The changed file cannot be accepted because it is invalid:")
@@ -172,6 +237,9 @@ struct GuardianView: View {
                 HStack(spacing: 8) {
                     clarifyButton
                     rejectButton
+                    if model.maintenance != nil {
+                        keepReviewingButton
+                    }
                 }
                 .accessibilityElement(children: .contain)
                 .accessibilityLabel("Invalid configuration decision")
@@ -204,7 +272,7 @@ struct GuardianView: View {
 
             detailsScroll(pending)
 
-            if model.reviewExpanded && pending.validationError == nil {
+            if model.reviewExpanded && pending.validationError == nil && model.maintenance == nil {
                 Button("Restore approved version", role: .destructive) { model.restore() }
                     .buttonStyle(.bordered)
                     .help("Write the last approved snapshot back to the watched file")
@@ -221,6 +289,9 @@ struct GuardianView: View {
                 reviewButton
                 clarifyButton
                 rejectButton
+                if model.maintenance != nil {
+                    keepReviewingButton
+                }
             }
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
@@ -228,7 +299,12 @@ struct GuardianView: View {
                     reviewButton
                     clarifyButton
                 }
-                rejectButton
+                HStack(spacing: 8) {
+                    rejectButton
+                    if model.maintenance != nil {
+                        keepReviewingButton
+                    }
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -237,11 +313,13 @@ struct GuardianView: View {
     }
 
     private var acceptButton: some View {
-        Button("Accept") { model.accept() }
+        Button(model.maintenance == nil ? "Accept" : "Accept final version") { model.accept() }
             .buttonStyle(.borderedProminent)
             .help("Accept this proposal and make it the approved snapshot")
-            .accessibilityLabel("Accept")
-            .accessibilityHint("Makes the current proposal the approved snapshot")
+            .accessibilityLabel(model.maintenance == nil ? "Accept" : "Accept final version")
+            .accessibilityHint(model.maintenance == nil
+                               ? "Makes the current proposal the approved snapshot"
+                               : "Ends maintenance and makes only the final version the approved snapshot")
     }
 
     private var reviewButton: some View {
@@ -270,11 +348,20 @@ struct GuardianView: View {
     }
 
     private var rejectButton: some View {
-        Button("Reject", role: .destructive) { model.reject() }
+        Button(model.maintenance == nil ? "Reject" : "Reject and restore checkpoint", role: .destructive) { model.reject() }
             .buttonStyle(.bordered)
             .help("Reject this change and restore the approved version")
-            .accessibilityLabel("Reject")
-            .accessibilityHint("Discards the unapproved proposal and restores the last approved snapshot")
+            .accessibilityLabel(model.maintenance == nil ? "Reject" : "Reject and restore checkpoint")
+            .accessibilityHint(model.maintenance == nil
+                               ? "Discards the unapproved proposal and restores the last approved snapshot"
+                               : "Discards the final update result and restores the exact pre-update checkpoint")
+    }
+
+    private var keepReviewingButton: some View {
+        Button("Keep updating") { model.keepMaintenanceActive() }
+            .buttonStyle(.bordered)
+            .help("Return to maintenance mode without accepting or restoring any file")
+            .accessibilityHint("Leaves the maintenance checkpoint active and makes no file change")
     }
 
     @ViewBuilder
@@ -466,6 +553,7 @@ struct GuardianView: View {
     private var statusColor: Color {
         switch model.status {
         case .clean: return .green
+        case .maintenance: return .blue
         case .changed: return .orange
         case .invalid, .error: return .red
         case .unenrolled: return .secondary
