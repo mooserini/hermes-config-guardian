@@ -18,6 +18,7 @@ The design is deliberately small: protect one consequential file well before exp
 - Verifies snapshots with SHA-256 before restoration.
 - Detects semantic YAML changes while redacting likely credential values in reviews.
 - Offers `Accept`, `Review`, `Clarify`, and one-click `Reject` decisions.
+- Keeps quick decisions in the menu-bar panel and opens the same live state in a resizable window for longer reviews; explanation and evidence overflow stays inside one scrollable details area.
 - Binds clarification to the proposed file hash so a late explanation cannot attach to a newer edit.
 - Uses directory events plus periodic checksum reconciliation; routine checks invoke no model.
 

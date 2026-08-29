@@ -114,6 +114,15 @@ final class GuardianModel: ObservableObject {
         if approved != nil { checkForChange() }
         #if GUARDIAN_UI_TEST_WINDOW
         documentationExpanded = environment["HCG_AUTO_EXPAND_DOCUMENTATION"] == "1"
+        if environment["HCG_AUTO_EXPAND_REVIEW"] == "1" {
+            reviewExpanded = true
+        }
+        if let specimenExplanation = environment["HCG_UI_SPECIMEN_EXPLANATION"],
+           !specimenExplanation.isEmpty,
+           pending != nil {
+            explanation = specimenExplanation
+            clarificationSource = .deterministic
+        }
         if environment["HCG_AUTO_CLARIFY"] == "1", pending != nil {
             clarify()
         }
