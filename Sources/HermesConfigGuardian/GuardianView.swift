@@ -417,7 +417,7 @@ struct GuardianView: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
             Toggle("Open review window automatically", isOn: $model.attentionWindowEnabled)
-                .help("Open Guardian when a newly proposed file version needs a decision")
+                .help("Open Guardian for a new proposal or a still-pending skill review at login")
             Toggle("Play attention sound", isOn: $model.attentionSoundEnabled)
                 .help("Play a sound when a newly proposed file version needs a decision")
         }

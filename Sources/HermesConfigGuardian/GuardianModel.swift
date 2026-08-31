@@ -91,7 +91,10 @@ final class GuardianModel: ObservableObject {
         didSet { attentionPreferences.setPlaysSound(attentionSoundEnabled) }
     }
     @Published var attentionWindowEnabled: Bool {
-        didSet { attentionPreferences.setOpensReviewWindow(attentionWindowEnabled) }
+        didSet {
+            attentionPreferences.setOpensReviewWindow(attentionWindowEnabled)
+            presentStartupSkillReminderIfNeeded()
+        }
     }
     @Published private(set) var launchAtLoginEnabled = false
     @Published private(set) var launchAtLoginMessage: String?
@@ -182,6 +185,9 @@ final class GuardianModel: ObservableObject {
     private var skillsWatcher: DirectoryWatcher?
     private var reconciliationTimer: Timer?
     private var skillReconcileTask: Task<Void, Never>?
+    private var initialSkillReconciliationFinished = false
+    private var startupSkillReminderNeeded = false
+    private var didPresentStartupSkillReminder = false
 
     init(
         environment: [String: String] = ProcessInfo.processInfo.environment,
@@ -298,6 +304,7 @@ final class GuardianModel: ObservableObject {
 
     func setAttentionWindowHandler(_ handler: @escaping @MainActor () -> Void) {
         openAttentionWindow = handler
+        presentStartupSkillReminderIfNeeded()
     }
 
     func setLaunchAtLogin(_ enabled: Bool) {
@@ -679,7 +686,21 @@ final class GuardianModel: ObservableObject {
         let baseline = try? skillsIntegrityStore.load()
         skillsIntegrity = SkillsIntegrityState.make(baseline: baseline, current: current)
         ensureSkillWatchers()
+        if !initialSkillReconciliationFinished {
+            initialSkillReconciliationFinished = true
+            startupSkillReminderNeeded = pending.needsAttention
+        }
         notifyForSkillStateIfNeeded()
+        presentStartupSkillReminderIfNeeded()
+    }
+
+    private func presentStartupSkillReminderIfNeeded() {
+        guard startupSkillReminderNeeded,
+              !didPresentStartupSkillReminder,
+              attentionWindowEnabled,
+              let openAttentionWindow else { return }
+        didPresentStartupSkillReminder = true
+        openAttentionWindow()
     }
 
     private func startWatching() {

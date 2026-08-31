@@ -126,6 +126,34 @@ final class GuardianSkillStateTests: XCTestCase {
         XCTAssertNotEqual(model.headline, "File rewrite needs attention")
     }
 
+    func testLoginWithExistingPendingSkillsOpensReviewWithoutReplayingSound() async throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        try Data("{\"id\":\"one\"}".utf8).write(to: fixture.pending.appendingPathComponent("one.json"))
+
+        let firstRun = makeModel(fixture: fixture)
+        firstRun.enroll()
+        await firstRun.waitForSkillReconciliationForTesting()
+
+        var soundCount = 0
+        var windowCount = 0
+        let reloaded = makeModel(fixture: fixture) {
+            soundCount += 1
+        }
+        reloaded.attentionWindowEnabled = true
+        reloaded.setAttentionWindowHandler {
+            windowCount += 1
+        }
+        await reloaded.waitForSkillReconciliationForTesting()
+
+        XCTAssertEqual(soundCount, 0)
+        XCTAssertEqual(windowCount, 1)
+
+        reloaded.checkForChange()
+        await reloaded.waitForSkillReconciliationForTesting()
+        XCTAssertEqual(windowCount, 1)
+    }
+
     private func makeFixture() throws -> (root: URL, source: URL, state: URL, pending: URL, skills: URL) {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("guardian-skill-model-\(UUID().uuidString)", isDirectory: true)
