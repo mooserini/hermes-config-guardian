@@ -37,6 +37,20 @@ final class GuardianModelTests: XCTestCase {
         )
     }
 
+    func testPendingSkillsKeepTheCleanGuardianShieldInTheMenuBar() async throws {
+        let fixture = try makeFixture(data: Data("value: approved\n".utf8))
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let pendingSkills = fixture.root.appendingPathComponent("pending-skills", isDirectory: true)
+        try FileManager.default.createDirectory(at: pendingSkills, withIntermediateDirectories: true)
+        try Data("{}\n".utf8).write(to: pendingSkills.appendingPathComponent("proposal.json"))
+
+        let model = makeModel(source: fixture.source, state: fixture.state)
+        model.enroll()
+        await model.waitForSkillReconciliationForTesting()
+
+        XCTAssertEqual(model.headlineSymbol, "checkmark.shield.fill")
+    }
+
     func testMaintenanceWindowRehydratesAfterModelRestart() throws {
         let fixture = try makeFixture(data: Data("value: approved\n".utf8))
         defer { try? FileManager.default.removeItem(at: fixture.root) }

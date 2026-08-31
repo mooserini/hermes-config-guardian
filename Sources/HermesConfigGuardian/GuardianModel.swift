@@ -150,9 +150,6 @@ final class GuardianModel: ObservableObject {
     var headlineSymbol: String {
         switch status {
         case .clean:
-            if pendingSkills.needsAttention || skillsIntegrity.needsAttention {
-                return "exclamationmark.triangle.fill"
-            }
             return status.symbol
         default:
             return status.symbol
