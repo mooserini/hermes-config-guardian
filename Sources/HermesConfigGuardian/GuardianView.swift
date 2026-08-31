@@ -1,3 +1,4 @@
+import AppKit
 import GuardianCore
 import SwiftUI
 
@@ -5,6 +6,8 @@ struct GuardianView: View {
     @ObservedObject var model: GuardianModel
     var onOpenWindow: (() -> Void)?
     @State private var showMaintenanceConfirmation = false
+    @State private var showRecordSkillsBaseline = false
+    @State private var showPendingSkillsReview = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -56,7 +59,7 @@ struct GuardianView: View {
                 moreMenu
                 Spacer(minLength: 8)
                 Button("Quit") { NSApplication.shared.terminate(nil) }
-                    .help("Quit Hermes Config Guardian")
+                    .help("Quit Hermes Guardian")
             }
             .buttonStyle(.borderless)
             .font(.caption)
@@ -83,17 +86,30 @@ struct GuardianView: View {
         } message: {
             Text("Guardian will seal the currently approved configuration, group expected Hermes update writes, preserve every observed proposal, and require final approval before the snapshot advances.")
         }
+        .confirmationDialog(
+            "Record current skill state?",
+            isPresented: $showRecordSkillsBaseline,
+            titleVisibility: .visible
+        ) {
+            Button("Record current skill state") { model.recordCurrentSkillState() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This stores a local integrity baseline of the current skill files. It does not approve pending skill writes or change any skill file.")
+        }
+        .sheet(isPresented: $showPendingSkillsReview) {
+            PendingSkillsReviewSheet(proposals: model.pendingSkillProposals)
+        }
     }
 
     private var header: some View {
         HStack(alignment: .center, spacing: 10) {
-            Image(systemName: model.status.symbol)
+            Image(systemName: model.headlineSymbol)
                 .font(.title2)
                 .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(statusColor)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
-                Text(model.status.title)
+                Text(model.headline)
                     .font(.headline)
                 Text(model.approved == nil ? model.sourceURL.path : model.monitoringSummary)
                     .font(.caption)
@@ -130,6 +146,13 @@ struct GuardianView: View {
                     .foregroundStyle(.secondary)
 
                 monitoredFileRow
+
+                Text("SKILL STATE")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                pendingSkillsRow
+                skillsIntegrityRow
 
                 Divider()
 
@@ -219,6 +242,173 @@ struct GuardianView: View {
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.quaternary.opacity(0.7), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private var pendingSkillsRow: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: model.pendingSkills.needsAttention ? "tray.full.fill" : "tray")
+                    .foregroundStyle(model.pendingSkills.needsAttention ? Color.orange : Color.secondary)
+                    .symbolRenderingMode(.hierarchical)
+                    .font(.title3)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Pending skills")
+                        .font(.subheadline.weight(.semibold))
+                    Text(pendingSkillsDetail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 8)
+                Text(model.pendingSkills.needsAttention ? "Awaiting review" : "None")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(model.pendingSkills.needsAttention ? Color.orange : Color.secondary)
+            }
+
+            if model.pendingSkills.needsAttention {
+                Button("Review") { showPendingSkillsReview = true }
+                    .buttonStyle(.bordered)
+                    .help("Read the queued skill proposals and copy an ID for Hermes' own review commands")
+                    .accessibilityHint("Opens a read-only list of pending skill proposals")
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.7), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Pending skills")
+        .accessibilityValue(pendingSkillsDetail)
+    }
+
+    private var pendingSkillsDetail: String {
+        switch model.pendingSkills {
+        case .none:
+            return "none"
+        case let .awaitingReview(count):
+            return "\(count) awaiting review"
+        case let .unavailable(message):
+            return message
+        }
+    }
+
+    @ViewBuilder
+    private var skillsIntegrityRow: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: skillsIntegritySymbol)
+                    .foregroundStyle(skillsIntegrityColor)
+                    .symbolRenderingMode(.hierarchical)
+                    .font(.title3)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Skills integrity")
+                        .font(.subheadline.weight(.semibold))
+                    Text(skillsIntegrityDetail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 8)
+                Text(skillsIntegrityBadge)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(skillsIntegrityColor)
+            }
+
+            if onOpenWindow == nil, let drift = model.skillsIntegrity.drift {
+                skillsDriftDetails(drift)
+            }
+
+            if model.canRecordSkillsBaseline {
+                Button("Record current skill state") {
+                    if model.skillsIntegrity.drift != nil {
+                        showRecordSkillsBaseline = true
+                    } else {
+                        model.recordCurrentSkillState()
+                    }
+                }
+                .buttonStyle(.bordered)
+                .help("Stores a local integrity baseline. This does not approve pending skill writes or change any skill files.")
+                .accessibilityHint("Stores only local Guardian state. It does not approve pending skill writes or change skills.")
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.7), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Skills integrity")
+        .accessibilityValue(model.skillsIntegrity.displayText)
+    }
+
+    private func skillsDriftDetails(_ drift: SkillsDrift) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if !drift.added.isEmpty {
+                Text("Added: \(drift.added.joined(separator: ", "))")
+            }
+            if !drift.changed.isEmpty {
+                Text("Changed: \(drift.changed.joined(separator: ", "))")
+            }
+            if !drift.removed.isEmpty {
+                Text("Removed: \(drift.removed.joined(separator: ", "))")
+            }
+        }
+        .font(.caption.monospaced())
+        .foregroundStyle(.secondary)
+        .textSelection(.enabled)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityLabel("Skills integrity drift paths")
+    }
+
+    private var skillsIntegritySymbol: String {
+        switch model.skillsIntegrity {
+        case .clean:
+            return "folder.badge.checkmark"
+        case .baselineNotRecorded:
+            return "folder.badge.questionmark"
+        case .drifted:
+            return "folder.badge.questionmark"
+        case .unavailable:
+            return "folder.badge.minus"
+        }
+    }
+
+    private var skillsIntegrityColor: Color {
+        switch model.skillsIntegrity {
+        case .clean:
+            return .green
+        case .baselineNotRecorded:
+            return .secondary
+        case .drifted:
+            return .orange
+        case .unavailable:
+            return .red
+        }
+    }
+
+    private var skillsIntegrityBadge: String {
+        switch model.skillsIntegrity {
+        case .clean:
+            return "Matches"
+        case .baselineNotRecorded:
+            return "Not recorded"
+        case let .drifted(drift):
+            return "\(drift.totalCount) differ"
+        case .unavailable:
+            return "Unavailable"
+        }
+    }
+
+    private var skillsIntegrityDetail: String {
+        switch model.skillsIntegrity {
+        case .clean:
+            return "matches recorded baseline"
+        case .baselineNotRecorded:
+            return "baseline not recorded"
+        case let .drifted(drift):
+            return "\(drift.totalCount) file\(drift.totalCount == 1 ? "" : "s") differ"
+        case let .unavailable(message):
+            return message
+        }
     }
 
     private var notificationsSection: some View {
@@ -666,11 +856,112 @@ struct GuardianView: View {
 
     private var statusColor: Color {
         switch model.status {
-        case .clean: return .green
+        case .clean:
+            if model.pendingSkills.needsAttention || model.skillsIntegrity.needsAttention {
+                return .orange
+            }
+            return .green
         case .maintenance: return .blue
         case .changed: return .orange
         case .invalid, .error: return .red
         case .unenrolled: return .secondary
         }
+    }
+}
+
+private struct PendingSkillsReviewSheet: View {
+    let proposals: [PendingSkillProposal]
+    @Environment(\.dismiss) private var dismiss
+    @State private var copiedID: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Pending skills")
+                    .font(.headline)
+                Text("Read-only review. Hermes remains responsible for approving or rejecting a proposal.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if proposals.isEmpty {
+                Text("There are no pending skill records to review.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(proposals) { proposal in
+                            proposalCard(proposal)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+
+            HStack {
+                Spacer()
+                Button("Done") { dismiss() }
+            }
+        }
+        .padding(18)
+        .frame(minWidth: 440, idealWidth: 560, minHeight: 360, idealHeight: 560)
+    }
+
+    private func proposalCard(_ proposal: PendingSkillProposal) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(proposal.title)
+                .font(.subheadline.weight(.semibold))
+                .textSelection(.enabled)
+
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(proposal.id)
+                    .font(.caption.monospaced())
+                    .textSelection(.enabled)
+                Button(copiedID == proposal.id ? "Copied" : "Copy ID") {
+                    copy(proposal.id)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("Copy this pending proposal's Hermes ID")
+                Spacer(minLength: 0)
+            }
+
+            Text("\(proposal.action) · \(proposal.origin)" + createdText(for: proposal))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if let issue = proposal.issue {
+                Text(issue)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if let recordText = proposal.recordText {
+                Text(recordText)
+                    .font(.caption.monospaced())
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(8)
+                    .background(.quaternary.opacity(0.7), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .accessibilityElement(children: .contain)
+    }
+
+    private func createdText(for proposal: PendingSkillProposal) -> String {
+        guard let createdAt = proposal.createdAt else { return "" }
+        return " · staged \(createdAt.formatted(date: .abbreviated, time: .shortened))"
+    }
+
+    private func copy(_ id: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        guard pasteboard.setString(id, forType: .string) else { return }
+        copiedID = id
     }
 }

@@ -99,9 +99,14 @@ final class GuardianModel: ObservableObject {
     @Published private(set) var documentationExcerpts: [DocumentationExcerpt] = []
     @Published private(set) var documentationStatus: String?
     @Published private(set) var documentationWarning: String?
+    @Published private(set) var pendingSkills: PendingSkillsState = .none
+    @Published private(set) var pendingSkillProposals: [PendingSkillProposal] = []
+    @Published private(set) var skillsIntegrity: SkillsIntegrityState = .baselineNotRecorded
 
     let sourceURL: URL
     let stateDirectory: URL
+    let pendingSkillsURL: URL
+    let skillsURL: URL
 
     /// This release intentionally supports one enrolled file. Keeping the
     /// presentation list-shaped makes the boundary explicit without claiming
@@ -119,17 +124,67 @@ final class GuardianModel: ObservableObject {
         return "\(fileText) · last check \(lastCheckedAt.formatted(date: .omitted, time: .shortened))"
     }
 
+    var headline: String {
+        switch status {
+        case .clean:
+            let pendingAttention = pendingSkills.needsAttention
+            let integrityAttention = skillsIntegrity.needsAttention
+            switch (pendingAttention, integrityAttention) {
+            case (false, false):
+                return status.title
+            case (true, false):
+                return "Pending skills await review"
+            case (false, true):
+                if case .unavailable = skillsIntegrity {
+                    return "Skills integrity unavailable"
+                }
+                return "Skills integrity needs attention"
+            case (true, true):
+                return "Skill state needs attention"
+            }
+        default:
+            return status.title
+        }
+    }
+
+    var headlineSymbol: String {
+        switch status {
+        case .clean:
+            if pendingSkills.needsAttention || skillsIntegrity.needsAttention {
+                return "exclamationmark.triangle.fill"
+            }
+            return status.symbol
+        default:
+            return status.symbol
+        }
+    }
+
+    var canRecordSkillsBaseline: Bool {
+        switch skillsIntegrity {
+        case .baselineNotRecorded, .drifted:
+            return true
+        case .clean, .unavailable:
+            return false
+        }
+    }
+
     private let store: ApprovalStore
     private let maintenanceStore: MaintenanceStore
+    private let skillsIntegrityStore: SkillsIntegrityStore
     private let documentationClient: HermesDocumentationClient
     private let hermesClarifier: HermesStatelessClarifier?
     private let attentionMarkerURL: URL
+    private let skillAttentionMarkerURL: URL
     private let performAttentionSound: @MainActor () -> Void
     private let attentionPreferences: AttentionPreferences
     private var openAttentionWindow: (@MainActor () -> Void)?
     private var attentionGate: ProposalAttentionGate
+    private var skillAttentionGate: ProposalAttentionGate
     private var watcher: DirectoryWatcher?
+    private var pendingSkillsWatcher: DirectoryWatcher?
+    private var skillsWatcher: DirectoryWatcher?
     private var reconciliationTimer: Timer?
+    private var skillReconcileTask: Task<Void, Never>?
 
     init(
         environment: [String: String] = ProcessInfo.processInfo.environment,
@@ -142,6 +197,16 @@ final class GuardianModel: ObservableObject {
         attentionWindowEnabled = preferences.opensReviewWindow
         let home = FileManager.default.homeDirectoryForCurrentUser
         sourceURL = URL(fileURLWithPath: environment["HCG_TARGET_CONFIG"] ?? home.appendingPathComponent(".hermes/config.yaml").path)
+        pendingSkillsURL = URL(
+            fileURLWithPath: environment["HCG_PENDING_SKILLS_DIR"]
+                ?? home.appendingPathComponent(".hermes/pending/skills").path,
+            isDirectory: true
+        )
+        skillsURL = URL(
+            fileURLWithPath: environment["HCG_SKILLS_DIR"]
+                ?? home.appendingPathComponent(".hermes/skills").path,
+            isDirectory: true
+        )
 
         if let overriddenState = environment["HCG_STATE_DIR"] {
             stateDirectory = URL(fileURLWithPath: overriddenState, isDirectory: true)
@@ -150,14 +215,21 @@ final class GuardianModel: ObservableObject {
             stateDirectory = support.appendingPathComponent("Hermes Config Guardian", isDirectory: true)
         }
         attentionMarkerURL = stateDirectory.appendingPathComponent("last-notified-proposal.txt")
+        skillAttentionMarkerURL = stateDirectory.appendingPathComponent("last-notified-skill-state.txt")
         let lastNotifiedHash = try? String(contentsOf: attentionMarkerURL, encoding: .utf8)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         attentionGate = ProposalAttentionGate(
             lastNotifiedProposalHash: lastNotifiedHash?.isEmpty == false ? lastNotifiedHash : nil
         )
+        let lastSkillFingerprint = try? String(contentsOf: skillAttentionMarkerURL, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        skillAttentionGate = ProposalAttentionGate(
+            lastNotifiedProposalHash: lastSkillFingerprint?.isEmpty == false ? lastSkillFingerprint : nil
+        )
         performAttentionSound = playAttentionSound
         store = ApprovalStore(stateDirectory: stateDirectory)
         maintenanceStore = MaintenanceStore(stateDirectory: stateDirectory)
+        skillsIntegrityStore = SkillsIntegrityStore(stateDirectory: stateDirectory)
         let installedDocsPath = environment["HCG_HERMES_DOCS_DIR"]
             ?? home.appendingPathComponent(".hermes/hermes-agent/website/docs", isDirectory: true).path
         documentationClient = HermesDocumentationClient(
@@ -190,6 +262,7 @@ final class GuardianModel: ObservableObject {
         startWatching()
         startReconciliationTimer(environment: environment)
         if approved != nil { checkForChange() }
+        reconcileSkillMonitors()
         #if GUARDIAN_UI_TEST_WINDOW
         documentationExpanded = environment["HCG_AUTO_EXPAND_DOCUMENTATION"] == "1"
         if environment["HCG_AUTO_EXPAND_REVIEW"] == "1" {
@@ -337,6 +410,7 @@ final class GuardianModel: ObservableObject {
     }
 
     func checkForChange() {
+        reconcileSkillMonitors()
         guard let approved else { return }
         do {
             let current = try Data(contentsOf: sourceURL)
@@ -542,6 +616,75 @@ final class GuardianModel: ObservableObject {
         }
     }
 
+    func recordCurrentSkillState() {
+        Task { await recordCurrentSkillStateNow() }
+    }
+
+    func recordCurrentSkillStateNow() async {
+        let skillsPath = skillsURL.path
+        let result = await Task.detached(priority: .utility) {
+            SkillsManifest.load(from: URL(fileURLWithPath: skillsPath, isDirectory: true))
+        }.value
+        switch result {
+        case let .success(manifest):
+            do {
+                _ = try skillsIntegrityStore.record(rootURL: skillsURL, manifest: manifest)
+                skillsIntegrity = .clean
+                notifyForSkillStateIfNeeded()
+            } catch {
+                skillsIntegrity = .unavailable("Could not record the skills baseline: \(error.localizedDescription)")
+            }
+        case let .unavailable(message):
+            skillsIntegrity = .unavailable(message)
+        }
+    }
+
+    func waitForSkillReconciliationForTesting() async {
+        await skillReconcileTask?.value
+    }
+
+    func reconcileSkillMonitors() {
+        skillReconcileTask?.cancel()
+        let pendingPath = pendingSkillsURL.path
+        let skillsPath = skillsURL.path
+        skillReconcileTask = Task { [weak self] in
+            let snapshot = await Task.detached(priority: .utility) {
+                (
+                    PendingSkillsMonitor.evaluate(
+                        at: URL(fileURLWithPath: pendingPath, isDirectory: true)
+                    ),
+                    PendingSkillProposalReader.load(
+                        from: URL(fileURLWithPath: pendingPath, isDirectory: true)
+                    ),
+                    SkillsManifest.load(
+                        from: URL(fileURLWithPath: skillsPath, isDirectory: true)
+                    )
+                )
+            }.value
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                self?.applySkillSnapshot(
+                    pending: snapshot.0,
+                    proposals: snapshot.1,
+                    current: snapshot.2
+                )
+            }
+        }
+    }
+
+    private func applySkillSnapshot(
+        pending: PendingSkillsState,
+        proposals: [PendingSkillProposal],
+        current: SkillsManifestLoadResult
+    ) {
+        pendingSkills = pending
+        pendingSkillProposals = proposals
+        let baseline = try? skillsIntegrityStore.load()
+        skillsIntegrity = SkillsIntegrityState.make(baseline: baseline, current: current)
+        ensureSkillWatchers()
+        notifyForSkillStateIfNeeded()
+    }
+
     private func startWatching() {
         watcher = DirectoryWatcher(targetURL: sourceURL) { [weak self] in
             Task { @MainActor in self?.checkForChange() }
@@ -551,6 +694,71 @@ final class GuardianModel: ObservableObject {
         } catch {
             status = .error(error.localizedDescription)
         }
+        ensureSkillWatchers()
+    }
+
+    private func ensureSkillWatchers() {
+        if pendingSkillsWatcher == nil, FileManager.default.fileExists(atPath: pendingSkillsURL.path) {
+            let watcher = DirectoryWatcher(
+                targetURL: pendingSkillsURL,
+                watchAncestorDirectory: false
+            ) { [weak self] in
+                Task { @MainActor in self?.reconcileSkillMonitors() }
+            }
+            if (try? watcher.start()) != nil {
+                pendingSkillsWatcher = watcher
+            }
+        }
+        if skillsWatcher == nil, FileManager.default.fileExists(atPath: skillsURL.path) {
+            let watcher = DirectoryWatcher(
+                targetURL: skillsURL,
+                watchAncestorDirectory: false
+            ) { [weak self] in
+                Task { @MainActor in self?.reconcileSkillMonitors() }
+            }
+            if (try? watcher.start()) != nil {
+                skillsWatcher = watcher
+            }
+        }
+    }
+
+    private func notifyForSkillStateIfNeeded() {
+        let pendingAttention = pendingSkills.needsAttention
+        let driftAttention = skillsIntegrity.drift != nil
+        let fingerprint = "\(pendingSkills.attentionFingerprint)|\(skillsIntegrity.attentionFingerprint)"
+        guard pendingAttention || driftAttention else {
+            resetSkillAttentionMarker()
+            return
+        }
+        switch status {
+        case .changed, .invalid:
+            return
+        default:
+            break
+        }
+        guard skillAttentionGate.shouldNotify(proposalHash: fingerprint) else { return }
+        try? FileManager.default.createDirectory(
+            at: stateDirectory,
+            withIntermediateDirectories: true
+        )
+        try? Data("\(fingerprint)\n".utf8).write(to: skillAttentionMarkerURL, options: .atomic)
+        try? FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: skillAttentionMarkerURL.path
+        )
+        if attentionSoundEnabled {
+            performAttentionSound()
+        }
+        if attentionWindowEnabled {
+            openAttentionWindow?()
+        }
+    }
+
+    private func resetSkillAttentionMarker() {
+        guard skillAttentionGate.lastNotifiedProposalHash != nil
+                || FileManager.default.fileExists(atPath: skillAttentionMarkerURL.path) else { return }
+        skillAttentionGate.reset()
+        try? FileManager.default.removeItem(at: skillAttentionMarkerURL)
     }
 
     private func notifyIfNeeded(proposalHash: String) {

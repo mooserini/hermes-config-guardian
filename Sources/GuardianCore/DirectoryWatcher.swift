@@ -14,6 +14,7 @@ public enum DirectoryWatcherError: LocalizedError {
 
 public final class DirectoryWatcher: @unchecked Sendable {
     private let targetURL: URL
+    private let watchAncestorDirectory: Bool
     private let queue: DispatchQueue
     private let debounceInterval: TimeInterval
     private let onChange: @Sendable () -> Void
@@ -24,9 +25,11 @@ public final class DirectoryWatcher: @unchecked Sendable {
     public init(
         targetURL: URL,
         debounceInterval: TimeInterval = 0.35,
+        watchAncestorDirectory: Bool = true,
         onChange: @escaping @Sendable () -> Void
     ) {
         self.targetURL = targetURL
+        self.watchAncestorDirectory = watchAncestorDirectory
         self.debounceInterval = debounceInterval
         self.onChange = onChange
         self.queue = DispatchQueue(label: "org.hermesconfigguardian.watcher", qos: .utility)
@@ -38,7 +41,7 @@ public final class DirectoryWatcher: @unchecked Sendable {
 
     public func start() throws {
         guard source == nil else { return }
-        let directory = targetURL.deletingLastPathComponent()
+        let directory = watchAncestorDirectory ? targetURL.deletingLastPathComponent() : targetURL
         descriptor = open(directory.path, O_EVTONLY)
         guard descriptor >= 0 else {
             throw DirectoryWatcherError.unableToOpenDirectory(directory.path)

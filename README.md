@@ -1,10 +1,10 @@
-# Hermes Config Guardian
+# Hermes Guardian
 
-Hermes Config Guardian is an independent macOS menu-bar sentry for human-approved changes to a Hermes Agent `config.yaml` file.
+Hermes Guardian is an independent macOS menu-bar sentry for human-approved changes to a Hermes Agent `config.yaml` file, plus read-only visibility into Hermes pending-skill and active-skill filesystem state.
 
 It preserves an exact approved snapshot outside Hermes, detects raw and semantic changes, explains the relevant settings with official Hermes documentation, and waits for a human to accept, review, clarify, or reject the change. Reject restores the last approved bytes immediately.
 
-The design is deliberately small: protect one consequential file well before expanding the boundary.
+The design is deliberately small: surface state honestly, reconcile it deterministically, and leave authority with the human.
 
 > [!IMPORTANT]
 > This is an experimental, independent project. It is not affiliated with or endorsed by Nous Research or the Hermes Agent project.
@@ -12,8 +12,10 @@ The design is deliberately small: protect one consequential file well before exp
 ## Current boundary
 
 - Watches one explicitly configured YAML file.
-- Never modifies Hermes source code.
+- Shows two additional read-only skill-state indicators: the pending-skill queue count and active-skills manifest integrity.
+- Never modifies Hermes source code, pending skill records, or active skill files.
 - Requires explicit enrollment; the first file observed is not silently trusted.
+- Requires an explicit human action before an active-skills integrity baseline is recorded.
 - Stores exact approved snapshots and append-only approval or rejection receipts outside Hermes.
 - Verifies snapshots with SHA-256 before restoration.
 - Detects semantic YAML changes while redacting likely credential values in reviews.
@@ -68,7 +70,7 @@ Build the locally signed menu-bar application:
 ./scripts/build-app.sh
 ```
 
-The bundle is created at `build/Hermes Config Guardian.app`.
+The bundle is created at `build/Hermes Guardian.app`.
 
 Install the release bundle in the current user's stable Applications directory:
 
@@ -133,7 +135,9 @@ The current test suite covers:
 - clean scalar presentation;
 - exact documentation extraction and canonical source preservation.
 - durable maintenance recovery, distinct rapid rewrites, no-change and
-  byte-only update results, invalid final YAML, and exact checkpoint rejection.
+  byte-only update results, invalid final YAML, and exact checkpoint rejection;
+- pending-skill empty versus nonempty counts without parsing payloads;
+- deterministic active-skills manifests, timestamp-only stability, added/changed/removed drift, missing-directory failure, and human-recorded baselines.
 
 An end-to-end disposable trial also verified that a clarification and its evidence survive repeated checksum reconciliation.
 
@@ -147,7 +151,7 @@ The evidence and limits from the first trial against a real Hermes configuration
 
 ## Roadmap
 
-The immediate goal is to make the one-file contract boringly reliable. A later version may generalize the same human-approval boundary to other silently rewritten Hermes state, including skill and pending-skill directories, without moving authority back inside the harness being watched.
+This candidate adds read-only pending-skill and active-skills integrity indicators without granting Guardian authority to approve, reject, restore, or edit skills. Configuration approval remains a separate human decision.
 
 The implemented [durable maintenance window](docs/design/durable-maintenance-window.md) groups the many writes made by an intentional Hermes update into one final human review without granting the updater automatic approval.
 

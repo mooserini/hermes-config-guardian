@@ -152,6 +152,8 @@ final class GuardianAdversarialTests: XCTestCase {
             environment: [
                 "HCG_TARGET_CONFIG": source.path,
                 "HCG_STATE_DIR": state.path,
+                "HCG_PENDING_SKILLS_DIR": source.deletingLastPathComponent().appendingPathComponent("pending-skills").path,
+                "HCG_SKILLS_DIR": source.deletingLastPathComponent().appendingPathComponent("active-skills").path,
                 "HCG_RECONCILE_INTERVAL": "3600",
             ],
             userDefaults: UserDefaults(suiteName: "GuardianAdversarialTests.\(UUID().uuidString)")!

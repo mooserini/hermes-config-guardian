@@ -4,7 +4,7 @@ set -euo pipefail
 script_dir="${0:A:h}"
 project_dir="${script_dir:h}"
 configuration="${1:-release}"
-app_dir="${project_dir}/build/Hermes Config Guardian.app"
+app_dir="${project_dir}/build/Hermes Guardian.app"
 icon_source="${project_dir}/Resources/AppIcon.png"
 swift_arguments=()
 plist_name="Info.plist"
@@ -22,7 +22,7 @@ cp ".build/${configuration}/HermesConfigGuardian" "${app_dir}/Contents/MacOS/Her
 cp "Resources/${plist_name}" "${app_dir}/Contents/Info.plist"
 
 if [[ -f "${icon_source}" ]]; then
-    icon_work_dir=$(mktemp -d "${TMPDIR:-/tmp}/hermes-config-guardian-icon.XXXXXX")
+    icon_work_dir=$(mktemp -d "${TMPDIR:-/tmp}/hermes-guardian-icon.XXXXXX")
     trap 'rm -rf -- "${icon_work_dir}"' EXIT
     iconset_dir="${icon_work_dir}/AppIcon.iconset"
     mkdir -p "${iconset_dir}"
