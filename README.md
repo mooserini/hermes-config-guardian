@@ -53,15 +53,42 @@ For controlled comparisons, `HCG_HERMES_CLARIFY_PROVIDER` and `HCG_HERMES_CLARIF
 
 ## Build and test
 
-Requirements:
+Build requirements:
 
 - macOS 14 or newer
-- Swift 6 toolchain
+- Apple development tools (Xcode or Command Line Tools) providing a macOS SDK and a Swift 6 toolchain
+
+Start from a checkout and confirm the selected toolchain:
+
+```sh
+git clone https://github.com/mooserini/hermes-config-guardian.git
+cd hermes-config-guardian
+swift --version
+sw_vers
+```
+
+SwiftPM declares the sole external package dependency, [Yams](https://github.com/jpsim/Yams), in `Package.swift`. The committed `Package.resolved` currently pins Yams 6.2.2; retain that file when reproducing a build.
+
+For a fresh checkout, resolve the package dependency from GitHub:
+
+```sh
+swift package resolve
+```
+
+Build and test commands also resolve dependencies as needed. The explicit resolution step above is suggested setup based on the package configuration; fresh-machine dependency resolution has not yet been validated.
+
+Basic monitoring needs the selected YAML file and Guardian's state directory. Hermes, its Python runtime, and inference credentials are optional runtime requirements for **Hermes-backed Clarify**, rather than build prerequisites. That route needs a Hermes agent directory containing `agent/oneshot.py`, an executable Python runtime (normally its `.venv/bin/python`), and authentication for the inference provider. When that route is unavailable, Guardian can use the optional Apple on-device model where supported, then deterministic fallback explanations.
 
 Run the tests:
 
 ```sh
 swift test
+```
+
+Stop if any test fails before building or installing. The authenticated live-inference test is skipped by default. Set `HCG_LIVE_HERMES_TEST=1` only when deliberately testing a configured Hermes runtime and its provider authentication:
+
+```sh
+HCG_LIVE_HERMES_TEST=1 swift test
 ```
 
 Build the locally signed menu-bar application:
@@ -70,9 +97,12 @@ Build the locally signed menu-bar application:
 ./scripts/build-app.sh
 ```
 
-The bundle is created at `build/Hermes Guardian.app`.
+The bundle is created at `build/Hermes Guardian.app`. The script uses an ad-hoc code signature for local use; it does not notarize the application.
 
-Install the release bundle in the current user's stable Applications directory:
+After tests, build, and a disposable-file trial pass, install the release bundle in the current user's stable Applications directory:
+
+> [!WARNING]
+> The installer rebuilds release and installs to `~/Applications/Hermes Guardian.app` by default. `HCG_INSTALL_ROOT` changes the destination directory. If an app already exists there, it is moved to `Hermes Guardian.previous.app`; an older app at that backup path is deleted first. Preserve any backup you need before running the installer.
 
 ```sh
 ./scripts/install-app.sh
@@ -109,15 +139,50 @@ receipt remains the authority for the final decision.
 
 ## Disposable-file trial
 
-Test with a disposable YAML file and isolated state directory before pointing Guardian at a real configuration:
+After building the app, test with a disposable YAML file and isolated configuration, state, skills, documentation, and runtime paths before pointing Guardian at a real configuration. Overriding only the target file and state directory leaves the other paths at their normal Hermes defaults.
 
 ```sh
-HCG_TARGET_CONFIG=/absolute/path/to/test-config.yaml \
-HCG_STATE_DIR=/absolute/path/to/test-state \
-swift run HermesConfigGuardian
+trial_dir=$(mktemp -d "${TMPDIR:-/tmp}/hermes-guardian-trial.XXXXXX")
+mkdir -p "$trial_dir/state" "$trial_dir/pending-skills" \
+  "$trial_dir/skills" "$trial_dir/docs"
+printf 'dummy_key: baseline\n' > "$trial_dir/config.yaml"
+
+open -n \
+  --env HCG_TARGET_CONFIG="$trial_dir/config.yaml" \
+  --env HCG_STATE_DIR="$trial_dir/state" \
+  --env HCG_PENDING_SKILLS_DIR="$trial_dir/pending-skills" \
+  --env HCG_SKILLS_DIR="$trial_dir/skills" \
+  --env HCG_HERMES_DOCS_DIR="$trial_dir/docs" \
+  --env HCG_HERMES_HOME="$trial_dir/hermes-home" \
+  --env HCG_HERMES_AGENT_DIR="$trial_dir/disabled-agent" \
+  --env HCG_HERMES_PYTHON="$trial_dir/disabled-python" \
+  --env HCG_RECONCILE_INTERVAL=1 \
+  --env HCG_AUTO_CLARIFY=0 \
+  --env HCG_AUTO_EXPAND_DOCUMENTATION=0 \
+  --env HCG_AUTO_EXPAND_REVIEW=0 \
+  "build/Hermes Guardian.app"
 ```
 
-Click the shield in the menu bar, enroll the disposable configuration, edit the YAML, and reopen the shield. Guardian should show the changed paths and four decision buttons.
+Click the trial app's shield in the menu bar and confirm that its target is `$trial_dir/config.yaml` before enrolling it. In the same shell, change the dummy value:
+
+```sh
+printf 'dummy_key: changed\n' > "$trial_dir/config.yaml"
+```
+
+Reopen the trial shield. Guardian should show the changed path and four decision buttons. Quit the trial instance when finished. The trial files remain available for inspection; this example does not delete them. The empty documentation directory and nonexistent runtime paths keep Hermes-backed inference unavailable during this monitoring trial.
+
+The path overrides select the defaults shown below. `HCG_HERMES_HOME` changes runtime discovery defaults; it does not redirect the target configuration, Guardian state, skills, or documentation paths.
+
+| Variable | Default when unset |
+| --- | --- |
+| `HCG_TARGET_CONFIG` | `~/.hermes/config.yaml` |
+| `HCG_STATE_DIR` | `~/Library/Application Support/Hermes Config Guardian` |
+| `HCG_PENDING_SKILLS_DIR` | `~/.hermes/pending/skills` |
+| `HCG_SKILLS_DIR` | `~/.hermes/skills` |
+| `HCG_HERMES_DOCS_DIR` | `~/.hermes/hermes-agent/website/docs` |
+| `HCG_HERMES_HOME` | `~/.hermes` (Hermes runtime discovery base) |
+| `HCG_HERMES_AGENT_DIR` | `hermes-agent` under the selected Hermes home |
+| `HCG_HERMES_PYTHON` | `.venv/bin/python` under the selected agent directory |
 
 `HCG_RECONCILE_INTERVAL` may be set to a shorter number of seconds for testing. The default is 30 seconds.
 
